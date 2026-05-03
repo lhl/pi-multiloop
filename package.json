@@ -17,7 +17,12 @@
     "type": "git",
     "url": "https://github.com/lhl/pi-multiloop"
   },
+  "author": "lhl <lhl@randomfoo.net>",
   "license": "MIT",
+  "homepage": "https://github.com/lhl/pi-multiloop#readme",
+  "bugs": {
+    "url": "https://github.com/lhl/pi-multiloop/issues"
+  },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
