@@ -133,7 +133,7 @@ git clone https://github.com/lhl/pi-multiloop
 cd pi-multiloop
 npm install
 npx vitest run
-pi install file:.
+pi install .
 ```
 
 ## Related Projects

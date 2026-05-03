@@ -5,6 +5,7 @@
 - Rewrite README for clarity
 - Add publish checklist (`docs/PUBLISH.md`)
 - Add CHANGELOG
+- Fix `pi install file:.` → `pi install .` across all docs
 
 ## 0.1.0
 

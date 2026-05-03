@@ -12,7 +12,7 @@ Steps to publish a new version of pi-multiloop.
 
 - [ ] `npx tsc --noEmit` passes
 - [ ] `npx vitest run` passes
-- [ ] `pi install file:.` loads without errors
+- [ ] `pi install .` loads without errors
 - [ ] `/multiloop status` responds correctly
 
 ## Review

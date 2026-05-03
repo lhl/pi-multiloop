@@ -65,7 +65,7 @@ npx vitest run
 |---|---|
 | Build | `npx tsc --noEmit` passes |
 | Tests | `npx vitest run` passes |
-| Install | `pi install file:.` loads without errors |
+| Install | `pi install .` loads without errors |
 | Extension | `/multiloop status` shows "no active loops" |
 
 ## Git Discipline
