@@ -113,7 +113,7 @@ Some projects benefit from committing state (e.g., keeping a durable record of o
 
 ### Path Conventions
 
-Everything lives under `.multiloop/` relative to your repo root (pi's cwd). The base directory is not yet configurable — planned for v0.2.
+Everything lives under `.multiloop/` relative to your repo root (pi's cwd).
 
 ## Composability
 

@@ -18,6 +18,7 @@ import {
   type LoopState,
   createInitialState,
   saveState,
+  loadState,
   reconstructState,
   appendResult,
 } from "./state.js";
@@ -45,6 +46,27 @@ function stateKey(id: LaneId): string {
 
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }], details: {} };
+}
+
+function loopSummary(cwd: string, entry: RegistryEntry): string {
+  const state = loadState(cwd, { lane: entry.lane, runTag: entry.runTag });
+  const parts: string[] = [`${entry.lane}/${entry.runTag}`];
+
+  if (state?.goal) {
+    const goal = state.goal.length > 60 ? state.goal.slice(0, 57) + "..." : state.goal;
+    parts.push(`"${goal}"`);
+  }
+
+  const details: string[] = [entry.mode];
+  if (state && state.iteration > 0) {
+    details.push(`${state.iteration} iter`);
+  }
+  if (state?.baseline !== null && state?.bestMetric !== null && state!.baseline !== state!.bestMetric) {
+    details.push(`${state!.baseline} → ${state!.bestMetric}`);
+  }
+  parts.push(`(${details.join(", ")})`);
+
+  return parts.join(" — ");
 }
 
 export default function (pi: ExtensionAPI) {
@@ -355,6 +377,8 @@ export default function (pi: ExtensionAPI) {
 
       if (trimmed === "stop" || trimmed.startsWith("stop ")) {
         const laneName = trimmed.replace(/^stop\s*/, "").trim();
+        let stopped = false;
+
         for (const [key, state] of activeStates.entries()) {
           if (!laneName || state.lane === laneName) {
             const id: LaneId = { lane: state.lane, runTag: state.runTag };
@@ -363,8 +387,31 @@ export default function (pi: ExtensionAPI) {
             updateLoopStatus(ctx.cwd, id, "completed");
             activeStates.delete(key);
             ctx.ui.notify(`Stopped loop ${formatLaneId(id)}`, "info");
+            stopped = true;
           }
         }
+
+        if (!stopped) {
+          const registry = readRegistry(ctx.cwd);
+          for (const entry of registry.loops) {
+            if (entry.status === "active" && (!laneName || entry.lane === laneName)) {
+              const id: LaneId = { lane: entry.lane, runTag: entry.runTag };
+              updateLoopStatus(ctx.cwd, id, "completed");
+              const state = reconstructState(ctx.cwd, id);
+              if (state) {
+                state.status = "stopped";
+                saveState(ctx.cwd, id, state);
+              }
+              ctx.ui.notify(`Stopped loop ${formatLaneId(id)}`, "info");
+              stopped = true;
+            }
+          }
+        }
+
+        if (!stopped) {
+          ctx.ui.notify(laneName ? `No active loop in lane "${laneName}".` : "No active loops to stop.", "info");
+        }
+
         updateStatus(ctx);
         return;
       }
@@ -393,7 +440,7 @@ export default function (pi: ExtensionAPI) {
         }
         const lines = registry.loops.map(
           (l) =>
-            `${l.status === "active" ? "*" : " "} ${l.lane}/${l.runTag} [${l.mode}] ${l.status}`
+            `${l.status === "active" ? "*" : " "} ${loopSummary(ctx.cwd, l)} [${l.status}]`
         );
         pi.sendMessage({
           customType: "multiloop-list",
@@ -473,7 +520,7 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify("No active loops.", "info");
         } else {
           const lines = registry.loops.map(
-            (l) => `  ${l.lane}/${l.runTag} [${l.mode}] ${l.status}`
+            (l) => `  ${loopSummary(ctx.cwd, l)} [${l.status}]`
           );
           pi.sendMessage({
             customType: "multiloop-status",
@@ -514,10 +561,11 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify(`No loop found: ${formatLaneId(id)}`, "error");
           return;
         }
+        const summary = loopSummary(ctx.cwd, loop);
         const dest = archiveLaneDirs(ctx.cwd, id);
         activeStates.delete(stateKey(id));
         updateStatus(ctx);
-        ctx.ui.notify(`Archived ${formatLaneId(id)} → ${dest}`, "info");
+        ctx.ui.notify(`Archived ${summary}`, "info");
         return;
       }
 
@@ -527,37 +575,43 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const completed = registry.loops.filter(
-        (l) => l.status === "completed" || l.status === "paused"
+      const archivable = registry.loops.filter(
+        (l) => l.status !== "archived"
       );
-      const remaining = registry.loops.filter(
-        (l) => l.status === "active" || l.status === "archived"
+      const inMemory = new Set(
+        Array.from(activeStates.values()).map((s) => `${s.lane}/${s.runTag}`)
+      );
+      const toArchive = archivable.filter(
+        (l) => l.status === "completed" || l.status === "paused" || !inMemory.has(`${l.lane}/${l.runTag}`)
       );
 
       const lines: string[] = [];
 
-      if (completed.length > 0) {
-        for (const loop of completed) {
+      if (toArchive.length > 0) {
+        for (const loop of toArchive) {
           const id: LaneId = { lane: loop.lane, runTag: loop.runTag };
+          const summary = loopSummary(ctx.cwd, loop);
           try {
-            const dest = archiveLaneDirs(ctx.cwd, id);
+            archiveLaneDirs(ctx.cwd, id);
             activeStates.delete(stateKey(id));
-            lines.push(`  archived: ${loop.lane}/${loop.runTag} [${loop.mode}]`);
+            lines.push(`  archived: ${summary}`);
           } catch {
-            lines.push(`  skipped: ${loop.lane}/${loop.runTag} (state dir missing)`);
+            lines.push(`  skipped: ${summary} (state dir missing)`);
             updateLoopStatus(ctx.cwd, id, "archived");
           }
         }
       } else {
-        lines.push("  No completed loops to archive.");
+        lines.push("  No loops to archive.");
       }
 
-      const active = remaining.filter((l) => l.status === "active");
-      if (active.length > 0) {
+      const stillActive = archivable.filter(
+        (l) => l.status === "active" && inMemory.has(`${l.lane}/${l.runTag}`)
+      );
+      if (stillActive.length > 0) {
         lines.push("");
-        lines.push("Still active:");
-        for (const loop of active) {
-          lines.push(`  * ${loop.lane}/${loop.runTag} [${loop.mode}]`);
+        lines.push("Still active (in current session):");
+        for (const loop of stillActive) {
+          lines.push(`  * ${loopSummary(ctx.cwd, loop)}`);
         }
       }
 

@@ -4,6 +4,11 @@
   "description": "Multi-lane autonomous iteration loops for pi — optimization, punchlist, research, and dev modes",
   "type": "module",
   "keywords": ["pi-package"],
+  "files": [
+    "extensions/",
+    "skills/",
+    "README.md"
+  ],
   "pi": {
     "extensions": ["./extensions"],
     "skills": ["./skills"]
