@@ -26,7 +26,7 @@ export interface LoopState {
   bestMetric: number | null;
   consecutiveFailures: number;
   pivotCount: number;
-  status: "running" | "paused" | "completed" | "stopped";
+  status: "running" | "paused" | "completed" | "stopped" | "archived";
   verifyCommand: string;
   guardCommand?: string;
   metricName?: string;
@@ -110,7 +110,7 @@ export function reconstructState(cwd: string, id: LaneId): LoopState | null {
   for (let i = results.length - 1; i >= 0; i--) {
     if (results[i].action === "revert") {
       consecutiveFailures++;
-    } else {
+    } else if (results[i].action === "keep") {
       break;
     }
   }
