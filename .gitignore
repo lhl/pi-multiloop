@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.autoloop-registry.json
+state/

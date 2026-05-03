@@ -1,0 +1,30 @@
+{
+  "name": "pi-multiloop",
+  "version": "0.1.0",
+  "description": "Multi-lane autonomous iteration loops for pi — optimization, punchlist, research, and dev modes",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./extensions"],
+    "skills": ["./skills"]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lhl/pi-multiloop"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-ai": "^0.71.0",
+    "@mariozechner/pi-coding-agent": "^0.71.0",
+    "@mariozechner/pi-tui": "^0.71.0",
+    "@sinclair/typebox": "^0.34.0",
+    "vitest": "^3.0.0",
+    "typescript": "^5.7.0"
+  }
+}
