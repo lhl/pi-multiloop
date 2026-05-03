@@ -1,20 +1,24 @@
 # pi-multiloop
 
-Multi-lane autonomous iteration loops for [pi](https://pi.dev). Run multiple independent experiment loops on the same worktree with isolated state, durable history, and flexible goal modes.
+An autoloop/autoresearch extension for [Pi](https://pi.dev) coding agent that lets you run multiple loops in the same worktree with isolated state per lane.
 
 ## Why
 
-Existing loop extensions force one loop per session or one loop per worktree. When you're tuning a CUDA kernel and sweeping quantization parameters at the same time, those experiments touch different files but share the same build artifacts and environment. pi-multiloop gives each loop its own lane with independent state — no worktree sprawl, no merge pain.
+Other loop extensions only support one loop per session or worktree. If you're tuning a CUDA kernel and sweeping quantization parameters at the same time, those experiments touch different files but share the same build artifacts. pi-multiloop lets each loop have its own lane with independent state, so you don't need extra worktrees or branches.
 
 ## Features
 
-- **Multi-loop isolation** — Run multiple loops on the same worktree with lane-based state isolation
-- **Four modes** — Optimize (edit→measure→keep/revert), Punchlist (iterate until checklist complete), Research (ablation logging), Dev (implement→test→commit)
-- **Use your own scripts** — The verify command is any bash command you already have
-- **Statistical confidence** — MAD scoring for noisy benchmarks (GPU timing, training loss)
-- **Durable history** — Append-only JSONL per lane survives context resets and session restarts
-- **Escalation** — Automatic strategy refinement on consecutive failures (3→refine, 5→pivot, stop)
-- **TUI dashboard** — Live status, metric history, and confidence levels per lane
+- **Multi-loop isolation** — run multiple loops on the same worktree, each with its own lane and state
+- **Four modes** — flexibly supports different types of loops:
+  - **Optimize** — the classic edit, measure, keep/revert cycle
+  - **Research** — log results from ablations or parameter sweeps without keep/revert
+  - **Dev** — implement, test, commit with iteration tracking
+  - **Punchlist** — iterate through a checklist until everything is done
+- **Flexible goals** — verify with any script or command you want
+- **Confidence scoring** — supports Median Absolute Deviation (MAD) to handle noisy benchmarks like GPU timing or training loss
+- **Durable history** — append-only JSONL per lane, survives context resets and restarts
+- **Escalation** — refines strategy automatically after consecutive failures
+- **TUI dashboard** — live status and metric history per lane
 
 ## Install
 
@@ -49,16 +53,16 @@ pi install npm:pi-multiloop
 ## Modes
 
 ### Optimize
-Edit → measure → keep if improved, revert if not → repeat. For kernel tuning, performance work, training sweeps.
-
-### Punchlist
-Parse a markdown checklist, pick next unchecked item, implement, verify, check it off. Converge when all items are done.
+Edit, measure, keep if improved or revert if not, repeat. Good for kernel tuning, performance work, training sweeps.
 
 ### Research
-Hypothesis → implement → measure → log results. No keep/revert — all results are preserved for comparison. For ablation studies and parameter sweeps.
+Hypothesis, implement, measure, log results. All results are preserved for comparison rather than kept/reverted. Good for ablation studies and parameter sweeps.
 
 ### Dev
-Pick task → implement → test → commit. General development with iteration tracking.
+Pick a task, implement, test, commit. General development with iteration tracking.
+
+### Punchlist
+Parse a markdown checklist, pick the next unchecked item, implement, verify, check it off. Done when all items pass.
 
 ## How State Works
 
@@ -103,13 +107,13 @@ your-repo/
 
 ### Gitignore
 
-If you don't want loop state tracked in version control, one line does it:
+Add this to `.gitignore` if you don't want loop state in version control:
 
 ```
 .multiloop/
 ```
 
-Some projects benefit from committing state (e.g., keeping a durable record of optimization runs alongside the code). The JSONL results are human-readable and diff-friendly — it's up to you.
+You can also commit the state if you want a record of optimization runs alongside the code. The JSONL results are human-readable and diff-friendly.
 
 ### Path Conventions
 
@@ -117,10 +121,10 @@ Everything lives under `.multiloop/` relative to your repo root (pi's cwd).
 
 ## Composability
 
-pi-multiloop focuses on iteration logic. It composes with:
-- **pi-boomerang** — Context compression for long-running loops
-- **pi-supervisor** — Goal enforcement and methodology steering
-- **pi-review-loop** — Quality gate at the end of iterations
+pi-multiloop handles iteration logic and composes with other Pi extensions:
+- **pi-boomerang** — context compression for long-running loops
+- **pi-supervisor** — goal enforcement and methodology steering
+- **pi-review-loop** — quality gate at the end of iterations
 
 ## Development
 

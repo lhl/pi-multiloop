@@ -1,7 +1,7 @@
 {
   "name": "pi-multiloop",
-  "version": "0.1.0",
-  "description": "Multi-lane autonomous iteration loops for pi — optimization, punchlist, research, and dev modes",
+  "version": "0.1.1",
+  "description": "Autoloop/autoresearch extension for Pi with multi-lane isolation",
   "type": "module",
   "keywords": ["pi-package"],
   "files": [
