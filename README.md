@@ -104,12 +104,15 @@ your-repo/
 
 ### Gitignore
 
-Add these to your `.gitignore` — loop state is local, not something you'd commit:
+If you don't want loop state tracked in version control, add these to your `.gitignore`:
 
 ```
 .multiloop-registry.json
-state/
+state/multiloop/
+artifacts/multiloop-archive/
 ```
+
+Some projects benefit from committing state (e.g., keeping a durable record of optimization runs alongside the code). The JSONL results are human-readable and diff-friendly — it's up to you.
 
 ### Path Conventions
 
