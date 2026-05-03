@@ -115,6 +115,12 @@ export function archiveLoop(
   const dest = join(base, `${timestamp}-${id.lane}-${id.runTag}`);
   mkdirSync(dest, { recursive: true });
   renameSync(src, dest);
+  const stateFile = join(dest, "state.json");
+  if (existsSync(stateFile)) {
+    const state = JSON.parse(readFileSync(stateFile, "utf-8"));
+    state.status = "archived";
+    writeFileSync(stateFile, JSON.stringify(state, null, 2) + "\n");
+  }
   const relDest = dest.startsWith(cwd) ? dest.slice(cwd.length + 1) : dest;
   updateLoopStatus(cwd, id, "archived", relDest);
   return dest;

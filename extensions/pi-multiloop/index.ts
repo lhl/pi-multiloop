@@ -252,8 +252,12 @@ export default function (pi: ExtensionAPI) {
         return textResult(`No state for lane "${params.lane}".`);
       }
 
+      if (state.currentMetric === null && state.baseline === null) {
+        return textResult(`No baseline yet for lane "${params.lane}". Run multiloop_measure first.`);
+      }
+
       const confidence = assessConfidence(params.measurements);
-      const baseline = state.currentMetric ?? state.baseline ?? 0;
+      const baseline = state.currentMetric ?? state.baseline!;
 
       const decision = {
         action: params.action as "keep" | "revert" | "log" | "skip",
@@ -435,7 +439,8 @@ export default function (pi: ExtensionAPI) {
           lines.push(`  archived: ${summary}`);
         } catch {
           lines.push(`  skipped: ${summary} (state dir missing)`);
-          updateLoopStatus(ctx.cwd, id, "archived");
+          activeStates.delete(stateKey(id));
+          updateLoopStatus(ctx.cwd, id, "archived", "");
         }
       }
     } else {

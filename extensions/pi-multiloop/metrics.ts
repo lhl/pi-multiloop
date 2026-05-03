@@ -100,11 +100,16 @@ export function formatDelta(
   direction: "lower" | "higher"
 ): string {
   const diff = current - baseline;
-  const pct = ((diff / Math.abs(baseline)) * 100).toFixed(1);
+  if (diff === 0) {
+    return "0 (unchanged)";
+  }
+  const pct = baseline !== 0
+    ? ` (${((diff / Math.abs(baseline)) * 100).toFixed(1)}%)`
+    : "";
   const arrow = direction === "lower"
     ? (diff < 0 ? "improved" : "regressed")
     : (diff > 0 ? "improved" : "regressed");
-  return `${diff >= 0 ? "+" : ""}${diff.toFixed(4)} (${pct}%) — ${arrow}`;
+  return `${diff >= 0 ? "+" : ""}${diff.toFixed(4)}${pct} — ${arrow}`;
 }
 
 export function confidenceLabel(confidence: "high" | "medium" | "low"): string {
