@@ -2,15 +2,35 @@
 
 ## 0.1.1
 
+### Commands
+- Consolidate all commands under `/multiloop` with subcommands: status, ls, stop, pause, resume, archive, rm, help
+- Remove separate `/multiloop-status` and `/multiloop-archive` commands
+- Add `rm` subcommand to delete loops and their state files
+- Add `help` subcommand (also shown for bare `/multiloop`)
+
+### Bug fixes
+- Fix `formatDelta` division by zero when baseline is 0
+- Fix `formatDelta` labeling unchanged metrics as "regressed"
+- Fix null state crash in `loopSummary` on session reload
+- Fix `stateDir` in registry not updating after archive
+- Fix archived `state.json` retaining pre-archive status
+- Fix archive catch block leaving stale registry entries
+- Fix `multiloop_decide` silently using baseline=0 before any measurement
+- Fix pause handler silently failing for registry-only loops
+- Fix `reconstructState` not counting reverts through log/skip entries
+
+### Type safety
+- Add `"archived"` to `LoopState.status` union type
+
+### Docs
 - Rewrite README for clarity
 - Add publish checklist (`docs/PUBLISH.md`)
 - Add CHANGELOG
+- Add TODO with v0.2 candidates (`docs/TODO.md`)
 - Fix `pi install file:.` → `pi install .` across all docs
-- Consolidate all commands under `/multiloop` with subcommands (status, ls, stop, pause, resume, archive, rm, help)
-- Remove separate `/multiloop-status` and `/multiloop-archive` commands
-- Add `rm` subcommand to delete loops and their state files
-- Add `help` subcommand
-- Fix null state crash in `loopSummary` on session reload
+
+### Tests
+- Add 57 tests for loop.ts and modes.ts (43 → 100 total)
 
 ## 0.1.0
 
