@@ -60,10 +60,9 @@ describe("detectMode", () => {
   });
 
   it("picks highest-scoring mode when keywords overlap", () => {
-    // "improve" + "implement" → optimize (1) vs dev (1), first wins
-    const result = detectMode("improve the implementation speed");
-    // optimize has "improve" + "speed", dev has "implement" → optimize wins
-    expect(result).toBe("optimize");
+    // "improve" matches optimize, "speed" matches optimize, "implement" substring matches dev
+    // optimize scores 2 (improve + speed), dev scores 1 (implement) → optimize wins
+    expect(detectMode("improve the implementation speed")).toBe("optimize");
   });
 });
 
