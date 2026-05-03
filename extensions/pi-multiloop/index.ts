@@ -593,11 +593,17 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      if (trimmed === "help") {
+      if (trimmed === "help" || !trimmed) {
         pi.sendMessage({
           customType: "multiloop-help",
           content: [
-            "Usage: /multiloop [command|goal]",
+            "pi-multiloop — run autonomous iteration loops with isolated state per lane.",
+            "",
+            "Modes:",
+            "  optimize    Edit, measure, keep/revert. For performance tuning and benchmarks.",
+            "  research    Measure and log without keep/revert. For ablations and sweeps.",
+            "  dev         Implement, test, commit. General development with tracking.",
+            "  punchlist   Work through a checklist until all items pass.",
             "",
             "Commands:",
             "  status           Show active loops",
@@ -609,18 +615,14 @@ export default function (pi: ExtensionAPI) {
             "  rm <id>          Delete a loop and its state files",
             "  help             Show this help",
             "",
-            "Anything else starts a new loop with your text as the goal.",
+            "To start a new loop, just describe your goal after /multiloop. For example:",
+            '  /multiloop improve inference latency, verify: `./bench.py --quick`',
+            "",
+            "If you need help setting one up, just ask — describe what you want to",
+            "optimize, research, or build and the agent will configure the loop for you.",
           ].join("\n"),
           display: true,
         });
-        return;
-      }
-
-      if (!trimmed) {
-        pi.sendUserMessage(
-          "I want to start a new multiloop. Please help me configure it — ask me about: the goal, mode (optimize/punchlist/research/dev), verify command, guard command, lane name, and scope.",
-          { deliverAs: "steer" }
-        );
         return;
       }
 
