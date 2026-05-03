@@ -6,8 +6,11 @@
 - Add publish checklist (`docs/PUBLISH.md`)
 - Add CHANGELOG
 - Fix `pi install file:.` → `pi install .` across all docs
-- Fix `/multiloop-status` command reference in docs (was `/multiloop status`)
-- Add `status` and `archive` subcommand forwarding to `/multiloop` command
+- Consolidate all commands under `/multiloop` with subcommands (status, ls, stop, pause, resume, archive, rm, help)
+- Remove separate `/multiloop-status` and `/multiloop-archive` commands
+- Add `rm` subcommand to delete loops and their state files
+- Add `help` subcommand
+- Fix null state crash in `loopSummary` on session reload
 
 ## 0.1.0
 

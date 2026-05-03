@@ -49,7 +49,7 @@ All state lives in a single `.multiloop/` directory at repo root:
 
 - Events: `session_start`, `before_agent_start`, `agent_end`
 - Tools: `multiloop_iterate`, `multiloop_measure`, `multiloop_decide`, `multiloop_log`
-- Commands: `/multiloop`, `/multiloop-status`, `/multiloop-archive`
+- Commands: `/multiloop` (with subcommands: status, ls, stop, pause, resume, archive, rm, help)
 - UI: Widget for lane status dashboard
 
 ### Testing
@@ -66,7 +66,7 @@ npx vitest run
 | Build | `npx tsc --noEmit` passes |
 | Tests | `npx vitest run` passes |
 | Install | `pi install .` loads without errors |
-| Extension | `/multiloop-status` shows "no active loops" |
+| Extension | `/multiloop status` shows "no active loops" |
 
 ## Git Discipline
 

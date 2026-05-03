@@ -12,6 +12,7 @@ import {
   parseLaneId,
   formatLaneId,
   archiveLoop as archiveLaneDirs,
+  deleteLaneDirs,
   readRegistry,
 } from "./lanes.js";
 import {
@@ -61,8 +62,8 @@ function loopSummary(cwd: string, entry: RegistryEntry): string {
   if (state && state.iteration > 0) {
     details.push(`${state.iteration} iter`);
   }
-  if (state?.baseline !== null && state?.bestMetric !== null && state!.baseline !== state!.bestMetric) {
-    details.push(`${state!.baseline} → ${state!.bestMetric}`);
+  if (state != null && state.baseline !== null && state.bestMetric !== null && state.baseline !== state.bestMetric) {
+    details.push(`${state.baseline} → ${state.bestMetric}`);
   }
   parts.push(`(${details.join(", ")})`);
 
@@ -572,6 +573,49 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
+      if (trimmed.startsWith("rm ")) {
+        const idStr = trimmed.replace(/^rm\s*/, "").trim();
+        const id = parseLaneId(idStr);
+        if (!id) {
+          ctx.ui.notify(`Invalid lane/run-tag: "${idStr}". Format: lane/run-tag`, "error");
+          return;
+        }
+        const loop = getLoop(ctx.cwd, id);
+        if (!loop) {
+          ctx.ui.notify(`No loop found: ${formatLaneId(id)}`, "error");
+          return;
+        }
+        const summary = loopSummary(ctx.cwd, loop);
+        activeStates.delete(stateKey(id));
+        deleteLaneDirs(ctx.cwd, id);
+        updateStatus(ctx);
+        ctx.ui.notify(`Deleted ${summary}`, "info");
+        return;
+      }
+
+      if (trimmed === "help") {
+        pi.sendMessage({
+          customType: "multiloop-help",
+          content: [
+            "Usage: /multiloop [command|goal]",
+            "",
+            "Commands:",
+            "  status           Show active loops",
+            "  ls               List all loops in registry",
+            "  stop [lane]      Stop active loop(s)",
+            "  pause [lane]     Pause active loop(s)",
+            "  resume <id>      Resume a stopped/paused loop",
+            "  archive [id]     Archive completed loops (all by default)",
+            "  rm <id>          Delete a loop and its state files",
+            "  help             Show this help",
+            "",
+            "Anything else starts a new loop with your text as the goal.",
+          ].join("\n"),
+          display: true,
+        });
+        return;
+      }
+
       if (!trimmed) {
         pi.sendUserMessage(
           "I want to start a new multiloop. Please help me configure it — ask me about: the goal, mode (optimize/punchlist/research/dev), verify command, guard command, lane name, and scope.",
@@ -630,20 +674,6 @@ export default function (pi: ExtensionAPI) {
           .join("\n"),
         { deliverAs: "steer" }
       );
-    },
-  });
-
-  pi.registerCommand("multiloop-status", {
-    description: "Show status of all active loops",
-    async handler(_args, ctx) {
-      showStatus(ctx);
-    },
-  });
-
-  pi.registerCommand("multiloop-archive", {
-    description: "Archive completed loops (all by default, or specify lane/run-tag)",
-    async handler(args, ctx) {
-      await archiveHandler(args, ctx);
     },
   });
 

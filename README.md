@@ -36,7 +36,7 @@ pi install npm:pi-multiloop
 # Confirm and go
 
 # Check status
-/multiloop-status
+/multiloop status
 
 # Start a second loop (different lane, same worktree)
 /multiloop
@@ -47,7 +47,7 @@ pi install npm:pi-multiloop
 /multiloop resume perf/run-001
 
 # Archive completed loop
-/multiloop-archive perf/run-001
+/multiloop archive perf/run-001
 ```
 
 ## Modes
@@ -82,7 +82,7 @@ your-repo/
     │       └── run-20260503-054200/
     │           ├── results.jsonl
     │           └── state.json
-    └── archive/                      # moved here by /multiloop-archive
+    └── archive/                      # moved here by /multiloop archive
         └── 2026-05-03T05-39-...-perf-run-20260503-053708/
             ├── results.jsonl
             └── state.json
@@ -103,7 +103,7 @@ your-repo/
 2. **Each iteration** — Appends to `results.jsonl`, overwrites `state.json`.
 3. **`/multiloop stop`** — Updates status in both `state.json` and registry. Files stay on disk.
 4. **`/multiloop resume`** — Reconstructs in-memory state from `results.jsonl` + `state.json`. No new files until next iteration.
-5. **`/multiloop-archive`** — Moves the run directory from `active/` to `archive/` with a timestamp prefix.
+5. **`/multiloop archive`** — Moves the run directory from `active/` to `archive/` with a timestamp prefix.
 
 ### Gitignore
 

@@ -115,6 +115,14 @@ export function archiveLoop(
   return dest;
 }
 
+export function deleteLaneDirs(cwd: string, id: LaneId): void {
+  const dir = laneDir(cwd, id);
+  if (existsSync(dir)) {
+    rmSync(dir, { recursive: true });
+  }
+  removeLoop(cwd, id);
+}
+
 export function generateRunTag(): string {
   const now = new Date();
   const date = now.toISOString().slice(0, 10).replace(/-/g, "");

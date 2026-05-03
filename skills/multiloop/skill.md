@@ -45,12 +45,14 @@ When a loop is active:
 ## Steerability
 
 The user can intervene at any time:
+- `/multiloop status` — detailed status of active loops
+- `/multiloop ls` — list all registered loops
 - `/multiloop stop [lane]` — stop a loop
 - `/multiloop pause [lane]` — pause for manual intervention
 - `/multiloop resume lane/run-tag` — resume a paused or stopped loop
-- `/multiloop list` — show all registered loops
-- `/multiloop-status` — detailed status of active loops
-- `/multiloop-archive lane/run-tag` — archive completed loop state
+- `/multiloop archive [lane/run-tag]` — archive completed loops
+- `/multiloop rm lane/run-tag` — delete a loop and its state files
+- `/multiloop help` — show available subcommands
 
 ## Context Management
 
