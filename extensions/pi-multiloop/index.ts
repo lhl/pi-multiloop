@@ -530,6 +530,8 @@ export default function (pi: ExtensionAPI) {
 
       if (trimmed === "pause" || trimmed.startsWith("pause ")) {
         const laneName = trimmed.replace(/^pause\s*/, "").trim();
+        let paused = false;
+
         for (const [key, state] of activeStates.entries()) {
           if (!laneName || state.lane === laneName) {
             const id: LaneId = { lane: state.lane, runTag: state.runTag };
@@ -538,8 +540,31 @@ export default function (pi: ExtensionAPI) {
             updateLoopStatus(ctx.cwd, id, "paused");
             activeStates.delete(key);
             ctx.ui.notify(`Paused loop ${formatLaneId(id)}`, "info");
+            paused = true;
           }
         }
+
+        if (!paused) {
+          const registry = readRegistry(ctx.cwd);
+          for (const entry of registry.loops) {
+            if (entry.status === "active" && (!laneName || entry.lane === laneName)) {
+              const id: LaneId = { lane: entry.lane, runTag: entry.runTag };
+              updateLoopStatus(ctx.cwd, id, "paused");
+              const state = reconstructState(ctx.cwd, id);
+              if (state) {
+                state.status = "paused";
+                saveState(ctx.cwd, id, state);
+              }
+              ctx.ui.notify(`Paused loop ${formatLaneId(id)}`, "info");
+              paused = true;
+            }
+          }
+        }
+
+        if (!paused) {
+          ctx.ui.notify(laneName ? `No active loop in lane "${laneName}".` : "No active loops to pause.", "info");
+        }
+
         updateStatus(ctx);
         return;
       }
