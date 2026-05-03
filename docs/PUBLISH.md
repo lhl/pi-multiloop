@@ -15,10 +15,11 @@ Steps to publish a new version of pi-multiloop.
 - [ ] `pi install file:.` loads without errors
 - [ ] `/multiloop status` responds correctly
 
-## Update
+## Review
 
-- [ ] Bump `version` in `package.json`
+- [ ] Review README for accuracy (commands, features, examples all match current behavior)
 - [ ] Update README if any user-facing behavior changed
+- [ ] Update CHANGELOG with new version section and summary of changes
 - [ ] Update `docs/PLAN.md` if scope or north stars changed
 - [ ] Update `CLAUDE.md` if file layout or conventions changed
 - [ ] Update mode descriptions in `extensions/pi-multiloop/modes.ts` if modes changed
@@ -32,9 +33,20 @@ Steps to publish a new version of pi-multiloop.
 ## Publish
 
 - [ ] `npm publish` (or `npm publish --dry-run` first to check)
-- [ ] Create GitHub Release from the tag with a short changelog
+- [ ] Create GitHub Release:
+  ```bash
+  gh release create vX.Y.Z --title "vX.Y.Z" --notes "$(cat <<'EOF'
+  <paste changelog section here>
+  EOF
+  )"
+  ```
 
 ## After Publishing
 
 - [ ] Verify on npm: `npm info pi-multiloop`
 - [ ] Test install from registry: `pi install npm:pi-multiloop`
+
+## Future Considerations
+
+- Trusted publishing via GitHub Actions (see textguard/shisad for examples)
+- CI workflow for automated test gates before publish
