@@ -60,12 +60,60 @@ Hypothesis → implement → measure → log results. No keep/revert — all res
 ### Dev
 Pick task → implement → test → commit. General development with iteration tracking.
 
-## Lane State
+## How State Works
 
-Each loop stores state in `state/multiloop/<LANE>/<RUN_TAG>/`:
-- `results.jsonl` — Append-only iteration log
-- `state.json` — Resume snapshot
-- `lessons.md` — Cross-run learning (optional)
+pi-multiloop writes state files into your repo's working directory. Here's everything it touches:
+
+```
+your-repo/
+├── .multiloop-registry.json          # created on first /multiloop
+├── state/
+│   └── multiloop/
+│       ├── perf/                     # one dir per lane
+│       │   └── run-20260503-053708/  # one dir per run
+│       │       ├── results.jsonl     # append-only iteration log
+│       │       ├── state.json        # resume snapshot
+│       │       └── lessons.md        # cross-run learning (optional)
+│       └── quant/                    # second lane, same worktree
+│           └── run-20260503-054200/
+│               ├── results.jsonl
+│               └── state.json
+└── artifacts/
+    └── multiloop-archive/            # created on /multiloop-archive
+        └── 2026-05-03T05-39-58-...-perf-run-20260503-053708/
+            ├── results.jsonl         # moved from state/
+            └── state.json
+```
+
+### File Reference
+
+| File | Written when | Contents |
+|---|---|---|
+| `.multiloop-registry.json` | Loop start/stop/archive | Index of all loops (lane, run-tag, mode, status, verify command). One file per repo. |
+| `state.json` | Every iteration + start/stop | Resume snapshot: iteration count, baseline, current/best metric, consecutive failures, pivot count, config. Overwritten each iteration. |
+| `results.jsonl` | Every iteration | Append-only log — one JSON line per iteration with: action (keep/revert/log), metric, baseline, delta, confidence, hypothesis, changes, measurements array. Never overwritten. |
+| `lessons.md` | On pivot escalation | Freeform notes appended when the loop pivots strategy. Carried forward to bias future hypotheses. |
+
+### Lifecycle
+
+1. **`/multiloop`** — Creates `.multiloop-registry.json` (if absent) and `state/multiloop/<lane>/<run-tag>/state.json`.
+2. **Each iteration** — Appends to `results.jsonl`, overwrites `state.json`.
+3. **`/multiloop stop`** — Updates status in both `state.json` and registry. Files stay on disk.
+4. **`/multiloop resume`** — Reconstructs in-memory state from `results.jsonl` + `state.json`. No new files until next iteration.
+5. **`/multiloop-archive`** — Moves the entire `state/multiloop/<lane>/<run-tag>/` directory to `artifacts/multiloop-archive/` with a timestamp prefix.
+
+### Gitignore
+
+Add these to your `.gitignore` — loop state is local, not something you'd commit:
+
+```
+.multiloop-registry.json
+state/
+```
+
+### Path Conventions
+
+All paths are relative to your repo root (pi's cwd). Currently not configurable — the state directory is always `state/multiloop/`, the registry is always `.multiloop-registry.json`, and archives go to `artifacts/multiloop-archive/`. Configurable paths are planned for v0.2.
 
 ## Composability
 
