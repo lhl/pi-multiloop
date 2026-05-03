@@ -70,7 +70,8 @@ export function registerLoop(cwd: string, entry: RegistryEntry): void {
 export function updateLoopStatus(
   cwd: string,
   id: LaneId,
-  status: RegistryEntry["status"]
+  status: RegistryEntry["status"],
+  stateDir?: string
 ): void {
   const registry = readRegistry(cwd);
   const entry = registry.loops.find(
@@ -78,6 +79,9 @@ export function updateLoopStatus(
   );
   if (entry) {
     entry.status = status;
+    if (stateDir !== undefined) {
+      entry.stateDir = stateDir;
+    }
     writeRegistry(cwd, registry);
   }
 }
@@ -111,7 +115,8 @@ export function archiveLoop(
   const dest = join(base, `${timestamp}-${id.lane}-${id.runTag}`);
   mkdirSync(dest, { recursive: true });
   renameSync(src, dest);
-  updateLoopStatus(cwd, id, "archived");
+  const relDest = dest.startsWith(cwd) ? dest.slice(cwd.length + 1) : dest;
+  updateLoopStatus(cwd, id, "archived", relDest);
   return dest;
 }
 
