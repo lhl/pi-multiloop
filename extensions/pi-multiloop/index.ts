@@ -499,24 +499,74 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("multiloop-archive", {
-    description: "Archive a completed loop's state directory",
+    description: "Archive completed loops (all by default, or specify lane/run-tag)",
     async handler(args, ctx) {
-      const id = parseLaneId(args.trim());
-      if (!id) {
-        ctx.ui.notify(`Invalid lane/run-tag: "${args.trim()}". Format: lane/run-tag`, "error");
+      const trimmed = args.trim();
+
+      if (trimmed) {
+        const id = parseLaneId(trimmed);
+        if (!id) {
+          ctx.ui.notify(`Invalid lane/run-tag: "${trimmed}". Format: lane/run-tag`, "error");
+          return;
+        }
+        const loop = getLoop(ctx.cwd, id);
+        if (!loop) {
+          ctx.ui.notify(`No loop found: ${formatLaneId(id)}`, "error");
+          return;
+        }
+        const dest = archiveLaneDirs(ctx.cwd, id);
+        activeStates.delete(stateKey(id));
+        updateStatus(ctx);
+        ctx.ui.notify(`Archived ${formatLaneId(id)} → ${dest}`, "info");
         return;
       }
 
-      const loop = getLoop(ctx.cwd, id);
-      if (!loop) {
-        ctx.ui.notify(`No loop found: ${formatLaneId(id)}`, "error");
+      const registry = readRegistry(ctx.cwd);
+      if (registry.loops.length === 0) {
+        ctx.ui.notify("No loops to archive.", "info");
         return;
       }
 
-      const dest = archiveLaneDirs(ctx.cwd, id);
-      activeStates.delete(stateKey(id));
+      const completed = registry.loops.filter(
+        (l) => l.status === "completed" || l.status === "paused"
+      );
+      const remaining = registry.loops.filter(
+        (l) => l.status === "active" || l.status === "archived"
+      );
+
+      const lines: string[] = [];
+
+      if (completed.length > 0) {
+        for (const loop of completed) {
+          const id: LaneId = { lane: loop.lane, runTag: loop.runTag };
+          try {
+            const dest = archiveLaneDirs(ctx.cwd, id);
+            activeStates.delete(stateKey(id));
+            lines.push(`  archived: ${loop.lane}/${loop.runTag} [${loop.mode}]`);
+          } catch {
+            lines.push(`  skipped: ${loop.lane}/${loop.runTag} (state dir missing)`);
+            updateLoopStatus(ctx.cwd, id, "archived");
+          }
+        }
+      } else {
+        lines.push("  No completed loops to archive.");
+      }
+
+      const active = remaining.filter((l) => l.status === "active");
+      if (active.length > 0) {
+        lines.push("");
+        lines.push("Still active:");
+        for (const loop of active) {
+          lines.push(`  * ${loop.lane}/${loop.runTag} [${loop.mode}]`);
+        }
+      }
+
       updateStatus(ctx);
-      ctx.ui.notify(`Archived ${formatLaneId(id)} → ${dest}`, "info");
+      pi.sendMessage({
+        customType: "multiloop-archive",
+        content: lines.join("\n"),
+        display: true,
+      });
     },
   });
 
