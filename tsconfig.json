@@ -11,7 +11,12 @@
     "rootDir": ".",
     "declaration": true,
     "sourceMap": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "paths": {
+      "@mariozechner/pi-coding-agent": ["/home/lhl/.config/nvm/24.7.0/lib/node_modules/@mariozechner/pi-coding-agent"],
+      "@mariozechner/pi-ai": ["/home/lhl/.config/nvm/24.7.0/lib/node_modules/@mariozechner/pi-ai"],
+      "@mariozechner/pi-tui": ["/home/lhl/.config/nvm/24.7.0/lib/node_modules/@mariozechner/pi-tui"]
+    }
   },
   "include": ["extensions/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist"]

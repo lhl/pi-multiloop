@@ -1,4 +1,4 @@
-import { Type, type Static } from "@sinclair/typebox";
+import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
   type LaneId,
@@ -18,14 +18,10 @@ import {
   type LoopState,
   createInitialState,
   saveState,
-  loadState,
   reconstructState,
   appendResult,
-  readResults,
-  readLessons,
 } from "./state.js";
 import {
-  parseMetric,
   assessConfidence,
   isImprovement,
   formatDelta,
@@ -39,7 +35,7 @@ import {
   buildIterationContext,
   buildEscalationPrompt,
 } from "./loop.js";
-import { type LoopMode, MODES, detectMode } from "./modes.js";
+import { MODES, detectMode } from "./modes.js";
 
 const activeStates = new Map<string, LoopState>();
 
@@ -47,8 +43,12 @@ function stateKey(id: LaneId): string {
   return `${id.lane}/${id.runTag}`;
 }
 
+function textResult(text: string) {
+  return { content: [{ type: "text" as const, text }], details: {} };
+}
+
 export default function (pi: ExtensionAPI) {
-  pi.on("session_start", async ({ ctx }) => {
+  pi.on("session_start", async (_event, ctx) => {
     const loops = getActiveLoops(ctx.cwd);
     for (const entry of loops) {
       const id: LaneId = { lane: entry.lane, runTag: entry.runTag };
@@ -65,20 +65,22 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("before_agent_start", async ({ ctx }) => {
-    if (activeStates.size === 0) return {};
+  pi.on("before_agent_start", async (event, _ctx) => {
+    if (activeStates.size === 0) return;
 
     const contexts: string[] = [];
     for (const state of activeStates.values()) {
       contexts.push(buildIterationContext(state));
     }
 
+    const append = [
+      "\n\n# Active Multiloop Loops\n",
+      ...contexts,
+      "\n\nUse the autoloop_iterate, autoloop_measure, and autoloop_decide tools to execute loop iterations.",
+    ].join("\n");
+
     return {
-      systemPromptAppend: [
-        "\n\n# Active Multiloop Loops\n",
-        ...contexts,
-        "\n\nUse the autoloop_iterate, autoloop_measure, and autoloop_decide tools to execute loop iterations.",
-      ].join("\n"),
+      systemPrompt: event.systemPrompt + append,
     };
   });
 
@@ -98,7 +100,7 @@ export default function (pi: ExtensionAPI) {
       const id: LaneId = { lane: params.lane, runTag: params.runTag ?? "" };
 
       let state: LoopState | undefined;
-      for (const [key, s] of activeStates.entries()) {
+      for (const [_key, s] of activeStates.entries()) {
         if (s.lane === id.lane) {
           state = s;
           id.runTag = s.runTag;
@@ -107,9 +109,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (!state) {
-        return {
-          resultForAssistant: `No active loop in lane "${id.lane}". Use /autoloop to start one.`,
-        };
+        return textResult(`No active loop in lane "${id.lane}". Use /autoloop to start one.`);
       }
 
       if (shouldReanchor(state.iteration)) {
@@ -120,8 +120,8 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      return {
-        resultForAssistant: [
+      return textResult(
+        [
           `Iteration ${state.iteration + 1} starting for ${formatLaneId(id)}.`,
           state.currentMetric !== null
             ? `Current ${state.metricName ?? "metric"}: ${state.currentMetric}`
@@ -131,8 +131,8 @@ export default function (pi: ExtensionAPI) {
           state.guardCommand ? `Then run guard: \`${state.guardCommand}\`` : "",
         ]
           .filter(Boolean)
-          .join("\n"),
-      };
+          .join("\n")
+      );
     },
   });
 
@@ -152,12 +152,12 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const id = findLane(params.lane);
       if (!id) {
-        return { resultForAssistant: `No active loop in lane "${params.lane}".` };
+        return textResult(`No active loop in lane "${params.lane}".`);
       }
 
       const state = activeStates.get(stateKey(id));
       if (!state) {
-        return { resultForAssistant: `No state for lane "${params.lane}".` };
+        return textResult(`No state for lane "${params.lane}".`);
       }
 
       const confidence = assessConfidence(params.measurements);
@@ -168,8 +168,8 @@ export default function (pi: ExtensionAPI) {
         state.bestMetric = confidence.median;
         saveState(ctx.cwd, id, state);
 
-        return {
-          resultForAssistant: [
+        return textResult(
+          [
             `Baseline established for ${formatLaneId(id)}:`,
             `  ${state.metricName ?? "Metric"}: ${confidence.median}`,
             `  MAD: ${confidence.mad}`,
@@ -177,15 +177,15 @@ export default function (pi: ExtensionAPI) {
             `  Measurements: [${params.measurements.join(", ")}]`,
             "",
             "Baseline recorded. Start optimizing.",
-          ].join("\n"),
-        };
+          ].join("\n")
+        );
       }
 
       const baseline = state.currentMetric ?? state.baseline;
       const improved = isImprovement(baseline, confidence.median, confidence.mad, state.metricDirection);
 
-      return {
-        resultForAssistant: [
+      return textResult(
+        [
           `Measurement for ${formatLaneId(id)}:`,
           `  ${state.metricName ?? "Metric"}: ${confidence.median}`,
           `  Baseline: ${baseline}`,
@@ -194,8 +194,8 @@ export default function (pi: ExtensionAPI) {
           `  Improved: ${improved ? "YES" : "NO"}`,
           "",
           `Call autoloop_decide with action="${improved ? "keep" : "revert"}" to proceed.`,
-        ].join("\n"),
-      };
+        ].join("\n")
+      );
     },
   });
 
@@ -221,12 +221,12 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const id = findLane(params.lane);
       if (!id) {
-        return { resultForAssistant: `No active loop in lane "${params.lane}".` };
+        return textResult(`No active loop in lane "${params.lane}".`);
       }
 
       let state = activeStates.get(stateKey(id));
       if (!state) {
-        return { resultForAssistant: `No state for lane "${params.lane}".` };
+        return textResult(`No state for lane "${params.lane}".`);
       }
 
       const confidence = assessConfidence(params.measurements);
@@ -280,7 +280,7 @@ export default function (pi: ExtensionAPI) {
         activeStates.delete(stateKey(id));
       }
 
-      return { resultForAssistant: lines.join("\n") };
+      return textResult(lines.join("\n"));
     },
   });
 
@@ -298,12 +298,12 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const id = findLane(params.lane);
       if (!id) {
-        return { resultForAssistant: `No active loop in lane "${params.lane}".` };
+        return textResult(`No active loop in lane "${params.lane}".`);
       }
 
       const state = activeStates.get(stateKey(id));
       if (!state) {
-        return { resultForAssistant: `No state for lane "${params.lane}".` };
+        return textResult(`No state for lane "${params.lane}".`);
       }
 
       appendResult(ctx.cwd, id, {
@@ -321,9 +321,9 @@ export default function (pi: ExtensionAPI) {
       saveState(ctx.cwd, id, state);
       activeStates.set(stateKey(id), state);
 
-      return {
-        resultForAssistant: `Logged iteration ${state.iteration} for ${formatLaneId(id)}.${params.metric !== undefined ? ` Metric: ${params.metric}` : ""}`,
-      };
+      return textResult(
+        `Logged iteration ${state.iteration} for ${formatLaneId(id)}.${params.metric !== undefined ? ` Metric: ${params.metric}` : ""}`
+      );
     },
   });
 
@@ -398,7 +398,7 @@ export default function (pi: ExtensionAPI) {
         pi.sendMessage({
           customType: "multiloop-list",
           content: lines.join("\n"),
-          display: "block",
+          display: true,
         });
         return;
       }
@@ -457,7 +457,7 @@ export default function (pi: ExtensionAPI) {
           "",
           "Run the verify command to establish a baseline, then begin iterating.",
         ]
-          .filter(Boolean)
+          .filter((l): l is string => l !== null)
           .join("\n"),
         { deliverAs: "steer" }
       );
@@ -478,7 +478,7 @@ export default function (pi: ExtensionAPI) {
           pi.sendMessage({
             customType: "multiloop-status",
             content: `No active loops. Registry has ${registry.loops.length} entries:\n${lines.join("\n")}`,
-            display: "block",
+            display: true,
           });
         }
         return;
@@ -493,7 +493,7 @@ export default function (pi: ExtensionAPI) {
       pi.sendMessage({
         customType: "multiloop-status",
         content: lines.join("\n"),
-        display: "block",
+        display: true,
       });
     },
   });

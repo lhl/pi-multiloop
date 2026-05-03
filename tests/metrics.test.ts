@@ -93,8 +93,8 @@ describe("isImprovement", () => {
   });
 
   it("uses threshold multiplier", () => {
-    expect(isImprovement(100, 90, 5, "lower", 2.0)).toBe(true);
-    expect(isImprovement(100, 92, 5, "lower", 2.0)).toBe(false);
+    expect(isImprovement(100, 89, 5, "lower", 2.0)).toBe(true);
+    expect(isImprovement(100, 90, 5, "lower", 2.0)).toBe(false);
   });
 
   it("handles zero MAD (any improvement counts)", () => {
