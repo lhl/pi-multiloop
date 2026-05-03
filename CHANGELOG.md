@@ -6,6 +6,8 @@
 - Add publish checklist (`docs/PUBLISH.md`)
 - Add CHANGELOG
 - Fix `pi install file:.` → `pi install .` across all docs
+- Fix `/multiloop-status` command reference in docs (was `/multiloop status`)
+- Add `status` and `archive` subcommand forwarding to `/multiloop` command
 
 ## 0.1.0
 

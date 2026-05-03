@@ -1,5 +1,5 @@
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import {
   type LaneId,
   type RegistryEntry,
@@ -349,6 +349,117 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  function showStatus(ctx: ExtensionCommandContext) {
+    if (activeStates.size === 0) {
+      const registry = readRegistry(ctx.cwd);
+      if (registry.loops.length === 0) {
+        pi.sendMessage({
+          customType: "multiloop-status",
+          content: "No active loops.",
+          display: true,
+        });
+      } else {
+        const lines = registry.loops.map(
+          (l) => `  ${loopSummary(ctx.cwd, l)} [${l.status}]`
+        );
+        pi.sendMessage({
+          customType: "multiloop-status",
+          content: `No active loops. Registry has ${registry.loops.length} entries:\n${lines.join("\n")}`,
+          display: true,
+        });
+      }
+      return;
+    }
+
+    const lines: string[] = [];
+    for (const state of activeStates.values()) {
+      lines.push(buildIterationContext(state));
+      lines.push("");
+    }
+
+    pi.sendMessage({
+      customType: "multiloop-status",
+      content: lines.join("\n"),
+      display: true,
+    });
+  }
+
+  async function archiveHandler(args: string, ctx: ExtensionCommandContext) {
+    const trimmed = args.trim();
+
+    if (trimmed) {
+      const id = parseLaneId(trimmed);
+      if (!id) {
+        ctx.ui.notify(`Invalid lane/run-tag: "${trimmed}". Format: lane/run-tag`, "error");
+        return;
+      }
+      const loop = getLoop(ctx.cwd, id);
+      if (!loop) {
+        ctx.ui.notify(`No loop found: ${formatLaneId(id)}`, "error");
+        return;
+      }
+      const summary = loopSummary(ctx.cwd, loop);
+      archiveLaneDirs(ctx.cwd, id);
+      activeStates.delete(stateKey(id));
+      updateStatus(ctx);
+      ctx.ui.notify(`Archived ${summary}`, "info");
+      return;
+    }
+
+    const registry = readRegistry(ctx.cwd);
+    if (registry.loops.length === 0) {
+      ctx.ui.notify("No loops to archive.", "info");
+      return;
+    }
+
+    const archivable = registry.loops.filter(
+      (l) => l.status !== "archived"
+    );
+    const inMemory = new Set(
+      Array.from(activeStates.values()).map((s) => `${s.lane}/${s.runTag}`)
+    );
+    const toArchive = archivable.filter(
+      (l) => l.status === "completed" || l.status === "paused" || !inMemory.has(`${l.lane}/${l.runTag}`)
+    );
+
+    const lines: string[] = [];
+
+    if (toArchive.length > 0) {
+      for (const loop of toArchive) {
+        const id: LaneId = { lane: loop.lane, runTag: loop.runTag };
+        const summary = loopSummary(ctx.cwd, loop);
+        try {
+          archiveLaneDirs(ctx.cwd, id);
+          activeStates.delete(stateKey(id));
+          lines.push(`  archived: ${summary}`);
+        } catch {
+          lines.push(`  skipped: ${summary} (state dir missing)`);
+          updateLoopStatus(ctx.cwd, id, "archived");
+        }
+      }
+    } else {
+      lines.push("  No loops to archive.");
+    }
+
+    const stillActive = archivable.filter(
+      (l) => l.status === "active" && inMemory.has(`${l.lane}/${l.runTag}`)
+    );
+    if (stillActive.length > 0) {
+      lines.push("");
+      lines.push("Still active (in current session):");
+      for (const loop of stillActive) {
+        lines.push(`  * ${loopSummary(ctx.cwd, loop)}`);
+      }
+    }
+
+    updateStatus(ctx);
+    pi.sendMessage({
+      customType: "multiloop-archive",
+      content: lines.join("\n"),
+      display: true,
+    });
+  }
+
   pi.registerCommand("multiloop", {
     description: "Start, resume, or manage autonomous iteration loops",
     async handler(args, ctx) {
@@ -450,6 +561,17 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
+      if (trimmed === "status") {
+        showStatus(ctx);
+        return;
+      }
+
+      if (trimmed === "archive" || trimmed.startsWith("archive ")) {
+        const archiveArgs = trimmed.replace(/^archive\s*/, "").trim();
+        await archiveHandler(archiveArgs, ctx);
+        return;
+      }
+
       if (!trimmed) {
         pi.sendUserMessage(
           "I want to start a new multiloop. Please help me configure it — ask me about: the goal, mode (optimize/punchlist/research/dev), verify command, guard command, lane name, and scope.",
@@ -514,113 +636,14 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("multiloop-status", {
     description: "Show status of all active loops",
     async handler(_args, ctx) {
-      if (activeStates.size === 0) {
-        const registry = readRegistry(ctx.cwd);
-        if (registry.loops.length === 0) {
-          ctx.ui.notify("No active loops.", "info");
-        } else {
-          const lines = registry.loops.map(
-            (l) => `  ${loopSummary(ctx.cwd, l)} [${l.status}]`
-          );
-          pi.sendMessage({
-            customType: "multiloop-status",
-            content: `No active loops. Registry has ${registry.loops.length} entries:\n${lines.join("\n")}`,
-            display: true,
-          });
-        }
-        return;
-      }
-
-      const lines: string[] = [];
-      for (const state of activeStates.values()) {
-        lines.push(buildIterationContext(state));
-        lines.push("");
-      }
-
-      pi.sendMessage({
-        customType: "multiloop-status",
-        content: lines.join("\n"),
-        display: true,
-      });
+      showStatus(ctx);
     },
   });
 
   pi.registerCommand("multiloop-archive", {
     description: "Archive completed loops (all by default, or specify lane/run-tag)",
     async handler(args, ctx) {
-      const trimmed = args.trim();
-
-      if (trimmed) {
-        const id = parseLaneId(trimmed);
-        if (!id) {
-          ctx.ui.notify(`Invalid lane/run-tag: "${trimmed}". Format: lane/run-tag`, "error");
-          return;
-        }
-        const loop = getLoop(ctx.cwd, id);
-        if (!loop) {
-          ctx.ui.notify(`No loop found: ${formatLaneId(id)}`, "error");
-          return;
-        }
-        const summary = loopSummary(ctx.cwd, loop);
-        const dest = archiveLaneDirs(ctx.cwd, id);
-        activeStates.delete(stateKey(id));
-        updateStatus(ctx);
-        ctx.ui.notify(`Archived ${summary}`, "info");
-        return;
-      }
-
-      const registry = readRegistry(ctx.cwd);
-      if (registry.loops.length === 0) {
-        ctx.ui.notify("No loops to archive.", "info");
-        return;
-      }
-
-      const archivable = registry.loops.filter(
-        (l) => l.status !== "archived"
-      );
-      const inMemory = new Set(
-        Array.from(activeStates.values()).map((s) => `${s.lane}/${s.runTag}`)
-      );
-      const toArchive = archivable.filter(
-        (l) => l.status === "completed" || l.status === "paused" || !inMemory.has(`${l.lane}/${l.runTag}`)
-      );
-
-      const lines: string[] = [];
-
-      if (toArchive.length > 0) {
-        for (const loop of toArchive) {
-          const id: LaneId = { lane: loop.lane, runTag: loop.runTag };
-          const summary = loopSummary(ctx.cwd, loop);
-          try {
-            archiveLaneDirs(ctx.cwd, id);
-            activeStates.delete(stateKey(id));
-            lines.push(`  archived: ${summary}`);
-          } catch {
-            lines.push(`  skipped: ${summary} (state dir missing)`);
-            updateLoopStatus(ctx.cwd, id, "archived");
-          }
-        }
-      } else {
-        lines.push("  No loops to archive.");
-      }
-
-      const stillActive = archivable.filter(
-        (l) => l.status === "active" && inMemory.has(`${l.lane}/${l.runTag}`)
-      );
-      if (stillActive.length > 0) {
-        lines.push("");
-        lines.push("Still active (in current session):");
-        for (const loop of stillActive) {
-          lines.push(`  * ${loopSummary(ctx.cwd, loop)}`);
-        }
-      }
-
-      updateStatus(ctx);
-      pi.sendMessage({
-        customType: "multiloop-archive",
-        content: lines.join("\n"),
-        display: true,
-      });
+      await archiveHandler(args, ctx);
     },
   });
 
