@@ -23,8 +23,8 @@ export interface Registry {
   loops: RegistryEntry[];
 }
 
-const REGISTRY_FILE = ".autoloop-registry.json";
-const STATE_BASE = "state/autoloop";
+const REGISTRY_FILE = ".multiloop-registry.json";
+const STATE_BASE = "state/multiloop";
 
 export function laneDir(cwd: string, id: LaneId): string {
   return resolve(cwd, STATE_BASE, id.lane, id.runTag);
@@ -104,7 +104,7 @@ export function archiveLoop(
   archiveBase?: string
 ): string {
   const src = laneDir(cwd, id);
-  const base = archiveBase ?? resolve(cwd, "artifacts/autoloop-archive");
+  const base = archiveBase ?? resolve(cwd, "artifacts/multiloop-archive");
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const dest = join(base, `${timestamp}-${id.lane}-${id.runTag}`);
   mkdirSync(dest, { recursive: true });

@@ -1,8 +1,8 @@
 ---
-name: autoloop
+name: multiloop
 description: Start and manage autonomous iteration loops for optimization, punchlist completion, research, and development
 triggers:
-  - autoloop
+  - multiloop
   - start a loop
   - optimization loop
   - punchlist
@@ -11,7 +11,7 @@ triggers:
   - ablation
 ---
 
-# Autoloop Setup Wizard
+# Multiloop Setup Wizard
 
 You are managing an autonomous iteration loop using pi-multiloop. When the user wants to start a new loop, guide them through setup.
 
@@ -32,25 +32,25 @@ Analyze the user's goal to detect the appropriate mode:
 4. **Ask for the guard command** (optional): "Any command that must pass for changes to be valid? (e.g., `make test`)"
 5. **Suggest a lane name** based on the goal (e.g., `perf`, `quant`, `plan`).
 6. **Ask for scope** (optional): "Any specific files or directories to focus on?"
-7. **Confirm and start**: Summarize the configuration, then use the `/autoloop` command with the parsed config.
+7. **Confirm and start**: Summarize the configuration, then use the `/multiloop` command with the parsed config.
 
 ## During the Loop
 
 When a loop is active:
-1. **Each iteration**: Use `autoloop_iterate` before making changes, then `autoloop_measure` after running verify, then `autoloop_decide` to keep/revert.
+1. **Each iteration**: Use `multiloop_iterate` before making changes, then `multiloop_measure` after running verify, then `multiloop_decide` to keep/revert.
 2. **Monitor escalation**: If the agent gets 3 consecutive failures, it should refine. At 5, pivot. At 2 pivots exhausted, stop.
 3. **Punchlist mode**: Read the checklist file, pick the next unchecked item, implement it, run guard, check it off.
-4. **Research mode**: Use `autoloop_log` instead of decide — record all results for later comparison.
+4. **Research mode**: Use `multiloop_log` instead of decide — record all results for later comparison.
 
 ## Steerability
 
 The user can intervene at any time:
-- `/autoloop stop [lane]` — stop a loop
-- `/autoloop pause [lane]` — pause for manual intervention
-- `/autoloop resume lane/run-tag` — resume a paused or stopped loop
-- `/autoloop list` — show all registered loops
-- `/autoloop-status` — detailed status of active loops
-- `/autoloop-archive lane/run-tag` — archive completed loop state
+- `/multiloop stop [lane]` — stop a loop
+- `/multiloop pause [lane]` — pause for manual intervention
+- `/multiloop resume lane/run-tag` — resume a paused or stopped loop
+- `/multiloop list` — show all registered loops
+- `/multiloop-status` — detailed status of active loops
+- `/multiloop-archive lane/run-tag` — archive completed loop state
 
 ## Context Management
 

@@ -76,7 +76,7 @@ export default function (pi: ExtensionAPI) {
     const append = [
       "\n\n# Active Multiloop Loops\n",
       ...contexts,
-      "\n\nUse the autoloop_iterate, autoloop_measure, and autoloop_decide tools to execute loop iterations.",
+      "\n\nUse the multiloop_iterate, multiloop_measure, and multiloop_decide tools to execute loop iterations.",
     ].join("\n");
 
     return {
@@ -92,8 +92,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "autoloop_iterate",
-    label: "Autoloop Iterate",
+    name: "multiloop_iterate",
+    label: "Multiloop Iterate",
     description: "Signal the start of a new loop iteration. Call this before making changes.",
     parameters: IterateParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -109,7 +109,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (!state) {
-        return textResult(`No active loop in lane "${id.lane}". Use /autoloop to start one.`);
+        return textResult(`No active loop in lane "${id.lane}". Use /multiloop to start one.`);
       }
 
       if (shouldReanchor(state.iteration)) {
@@ -144,8 +144,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "autoloop_measure",
-    label: "Autoloop Measure",
+    name: "multiloop_measure",
+    label: "Multiloop Measure",
     description:
       "Record measurements from running the verify command. Pass multiple measurements for statistical confidence.",
     parameters: MeasureParams,
@@ -193,7 +193,7 @@ export default function (pi: ExtensionAPI) {
           `  MAD: ${confidence.mad} | Confidence: ${confidenceLabel(confidence.confidence)}`,
           `  Improved: ${improved ? "YES" : "NO"}`,
           "",
-          `Call autoloop_decide with action="${improved ? "keep" : "revert"}" to proceed.`,
+          `Call multiloop_decide with action="${improved ? "keep" : "revert"}" to proceed.`,
         ].join("\n")
       );
     },
@@ -213,8 +213,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "autoloop_decide",
-    label: "Autoloop Decide",
+    name: "multiloop_decide",
+    label: "Multiloop Decide",
     description:
       "Record keep/revert decision for current iteration. Updates state and logs the result.",
     parameters: DecideParams,
@@ -291,8 +291,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "autoloop_log",
-    label: "Autoloop Log",
+    name: "multiloop_log",
+    label: "Multiloop Log",
     description: "Log an iteration result without keep/revert semantics. For research and dev modes.",
     parameters: LogParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -327,7 +327,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("autoloop", {
+  pi.registerCommand("multiloop", {
     description: "Start, resume, or manage autonomous iteration loops",
     async handler(args, ctx) {
       const trimmed = args.trim();
@@ -405,7 +405,7 @@ export default function (pi: ExtensionAPI) {
 
       if (!trimmed) {
         pi.sendUserMessage(
-          "I want to start a new autoloop. Please help me configure it — ask me about: the goal, mode (optimize/punchlist/research/dev), verify command, guard command, lane name, and scope.",
+          "I want to start a new multiloop. Please help me configure it — ask me about: the goal, mode (optimize/punchlist/research/dev), verify command, guard command, lane name, and scope.",
           { deliverAs: "steer" }
         );
         return;
@@ -439,7 +439,7 @@ export default function (pi: ExtensionAPI) {
         mode,
         status: "active",
         startedAt: state.startedAt,
-        stateDir: `state/autoloop/${id.lane}/${id.runTag}`,
+        stateDir: `state/multiloop/${id.lane}/${id.runTag}`,
         verifyCommand,
         guardCommand: guardParts?.[1],
       };
@@ -464,7 +464,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("autoloop-status", {
+  pi.registerCommand("multiloop-status", {
     description: "Show status of all active loops",
     async handler(_args, ctx) {
       if (activeStates.size === 0) {
@@ -498,7 +498,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("autoloop-archive", {
+  pi.registerCommand("multiloop-archive", {
     description: "Archive a completed loop's state directory",
     async handler(args, ctx) {
       const id = parseLaneId(args.trim());

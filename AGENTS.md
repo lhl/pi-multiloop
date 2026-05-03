@@ -13,7 +13,7 @@ Pi extension for multi-lane autonomous iteration loops. Supports optimization, p
 - Primary purpose: pi extension package (npm: `pi-multiloop`)
 - Source-of-truth docs: `docs/PLAN.md` (project plan + north stars), `README.md` (user-facing docs)
 - Extension entry point: `extensions/pi-multiloop/index.ts`
-- Skill: `skills/autoloop/skill.md`
+- Skill: `skills/multiloop/skill.md`
 
 ## Key Files
 
@@ -27,7 +27,7 @@ Pi extension for multi-lane autonomous iteration loops. Supports optimization, p
 | `extensions/pi-multiloop/loop.ts` | Core iterate/keep/revert/escalation engine |
 | `extensions/pi-multiloop/modes.ts` | Mode definitions and punchlist parser |
 | `extensions/pi-multiloop/ui.ts` | TUI dashboard widget |
-| `skills/autoloop/skill.md` | Setup wizard skill prompt |
+| `skills/multiloop/skill.md` | Setup wizard skill prompt |
 | `docs/PLAN.md` | North stars, gap analysis, implementation checklist |
 
 ## Architecture
@@ -36,19 +36,19 @@ Pi extension for multi-lane autonomous iteration loops. Supports optimization, p
 
 Each loop runs in a lane with its own state directory:
 ```
-state/autoloop/<LANE>/<RUN_TAG>/
+state/multiloop/<LANE>/<RUN_TAG>/
 ├── results.jsonl    # Append-only iteration log
 ├── state.json       # Resume snapshot
 └── lessons.md       # Cross-run learning (optional)
 ```
 
-Shared registry at repo root: `.autoloop-registry.json` (gitignored).
+Shared registry at repo root: `.multiloop-registry.json` (gitignored).
 
 ### Pi Extension API Usage
 
 - Events: `session_start`, `before_agent_start`, `agent_end`
-- Tools: `autoloop_iterate`, `autoloop_measure`, `autoloop_decide`, `autoloop_log`
-- Commands: `/autoloop`, `/autoloop-status`, `/autoloop-archive`
+- Tools: `multiloop_iterate`, `multiloop_measure`, `multiloop_decide`, `multiloop_log`
+- Commands: `/multiloop`, `/multiloop-status`, `/multiloop-archive`
 - UI: Widget for lane status dashboard
 
 ### Testing
@@ -65,7 +65,7 @@ npx vitest run
 | Build | `npx tsc --noEmit` passes |
 | Tests | `npx vitest run` passes |
 | Install | `pi install file:.` loads without errors |
-| Extension | `/autoloop status` shows "no active loops" |
+| Extension | `/multiloop status` shows "no active loops" |
 
 ## Git Discipline
 

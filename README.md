@@ -26,24 +26,24 @@ pi install npm:pi-multiloop
 
 ```bash
 # Start an optimization loop
-/autoloop
+/multiloop
 # Describe your goal: "improve inference latency"
 # Specify verify command: "./bench.py --quick"
 # Confirm and go
 
 # Check status
-/autoloop-status
+/multiloop-status
 
 # Start a second loop (different lane, same worktree)
-/autoloop
+/multiloop
 # Describe: "reduce memory usage"
 # Different lane name, same worktree
 
 # Resume after restart
-/autoloop resume perf/run-001
+/multiloop resume perf/run-001
 
 # Archive completed loop
-/autoloop-archive perf/run-001
+/multiloop-archive perf/run-001
 ```
 
 ## Modes
@@ -62,7 +62,7 @@ Pick task → implement → test → commit. General development with iteration 
 
 ## Lane State
 
-Each loop stores state in `state/autoloop/<LANE>/<RUN_TAG>/`:
+Each loop stores state in `state/multiloop/<LANE>/<RUN_TAG>/`:
 - `results.jsonl` — Append-only iteration log
 - `state.json` — Resume snapshot
 - `lessons.md` — Cross-run learning (optional)
