@@ -23,8 +23,9 @@ export interface Registry {
   loops: RegistryEntry[];
 }
 
-const REGISTRY_FILE = ".multiloop-registry.json";
-const STATE_BASE = "state/multiloop";
+const BASE_DIR = ".multiloop";
+const REGISTRY_FILE = `${BASE_DIR}/registry.json`;
+const STATE_BASE = `${BASE_DIR}/active`;
 
 export function laneDir(cwd: string, id: LaneId): string {
   return resolve(cwd, STATE_BASE, id.lane, id.runTag);
@@ -43,6 +44,7 @@ export function readRegistry(cwd: string): Registry {
 }
 
 export function writeRegistry(cwd: string, registry: Registry): void {
+  mkdirSync(resolve(cwd, BASE_DIR), { recursive: true });
   writeFileSync(registryPath(cwd), JSON.stringify(registry, null, 2) + "\n");
 }
 
@@ -104,7 +106,7 @@ export function archiveLoop(
   archiveBase?: string
 ): string {
   const src = laneDir(cwd, id);
-  const base = archiveBase ?? resolve(cwd, "artifacts/multiloop-archive");
+  const base = archiveBase ?? resolve(cwd, `${BASE_DIR}/archive`);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const dest = join(base, `${timestamp}-${id.lane}-${id.runTag}`);
   mkdirSync(dest, { recursive: true });

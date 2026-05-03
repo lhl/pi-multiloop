@@ -49,7 +49,7 @@ describe("registry", () => {
       mode: "optimize",
       status: "active",
       startedAt: new Date().toISOString(),
-      stateDir: "state/multiloop/perf/run-001",
+      stateDir: ".multiloop/active/perf/run-001",
       verifyCommand: "echo 42",
     };
     registerLoop(cwd, entry);
@@ -64,7 +64,7 @@ describe("registry", () => {
       mode: "optimize",
       status: "active",
       startedAt: new Date().toISOString(),
-      stateDir: "state/multiloop/perf/run-001",
+      stateDir: ".multiloop/active/perf/run-001",
       verifyCommand: "echo 42",
     };
     registerLoop(cwd, entry);
@@ -80,7 +80,7 @@ describe("registry", () => {
       mode: "optimize",
       status: "active",
       startedAt: new Date().toISOString(),
-      stateDir: "state/multiloop/perf/run-001",
+      stateDir: ".multiloop/active/perf/run-001",
       verifyCommand: "echo 42",
     });
     removeLoop(cwd, { lane: "perf", runTag: "run-001" });
@@ -94,7 +94,7 @@ describe("registry", () => {
       mode: "optimize",
       status: "active",
       startedAt: new Date().toISOString(),
-      stateDir: "state/multiloop/perf/run-001",
+      stateDir: ".multiloop/active/perf/run-001",
       verifyCommand: "echo 42",
     });
     updateLoopStatus(cwd, { lane: "perf", runTag: "run-001" }, "paused");
@@ -128,12 +128,12 @@ describe("registry", () => {
 describe("lane paths", () => {
   it("constructs lane directory path", () => {
     const dir = laneDir(cwd, { lane: "perf", runTag: "run-001" });
-    expect(dir).toContain("state/multiloop/perf/run-001");
+    expect(dir).toContain(".multiloop/active/perf/run-001");
   });
 
   it("creates lane directory", () => {
     const dir = ensureLaneDir(cwd, { lane: "perf", runTag: "run-001" });
-    expect(dir).toContain("state/multiloop/perf/run-001");
+    expect(dir).toContain(".multiloop/active/perf/run-001");
   });
 });
 

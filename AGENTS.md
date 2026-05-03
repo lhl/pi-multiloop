@@ -34,15 +34,16 @@ Pi extension for multi-lane autonomous iteration loops. Supports optimization, p
 
 ### Lane Isolation
 
-Each loop runs in a lane with its own state directory:
+All state lives in a single `.multiloop/` directory at repo root:
 ```
-state/multiloop/<LANE>/<RUN_TAG>/
-├── results.jsonl    # Append-only iteration log
-├── state.json       # Resume snapshot
-└── lessons.md       # Cross-run learning (optional)
+.multiloop/
+├── registry.json
+├── active/<LANE>/<RUN_TAG>/
+│   ├── results.jsonl    # Append-only iteration log
+│   ├── state.json       # Resume snapshot
+│   └── lessons.md       # Cross-run learning (optional)
+└── archive/             # Completed loops moved here
 ```
-
-Shared registry at repo root: `.multiloop-registry.json` (gitignored).
 
 ### Pi Extension API Usage
 

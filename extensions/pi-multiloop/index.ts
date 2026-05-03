@@ -439,7 +439,7 @@ export default function (pi: ExtensionAPI) {
         mode,
         status: "active",
         startedAt: state.startedAt,
-        stateDir: `state/multiloop/${id.lane}/${id.runTag}`,
+        stateDir: `.multiloop/active/${id.lane}/${id.runTag}`,
         verifyCommand,
         guardCommand: guardParts?.[1],
       };
