@@ -175,7 +175,7 @@ function loopSummary(cwd: string, entry: RegistryEntry): string {
   return parts.join(" — ");
 }
 
-interface ResumableLoopsWidgetStyle {
+interface ResumableLoopsNoticeStyle {
   title?: (text: string) => string;
   rule?: (text: string) => string;
   loopId?: (text: string) => string;
@@ -189,8 +189,8 @@ interface ResumableLoopsWidgetStyle {
 }
 
 function styleText(
-  styles: ResumableLoopsWidgetStyle,
-  key: keyof ResumableLoopsWidgetStyle,
+  styles: ResumableLoopsNoticeStyle,
+  key: keyof ResumableLoopsNoticeStyle,
   text: string
 ): string {
   const style = styles[key];
@@ -202,10 +202,10 @@ function truncateDisplay(text: string, maxChars: number): string {
   return text.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
 }
 
-export function buildResumableLoopsWidget(
+export function buildResumableLoopsNotice(
   cwd: string,
   loops: RegistryEntry[],
-  styles: ResumableLoopsWidgetStyle = {}
+  styles: ResumableLoopsNoticeStyle = {}
 ): string[] {
   const shown = loops.slice(0, 8);
   const status = [
@@ -258,35 +258,28 @@ function resumableLoops(cwd: string): RegistryEntry[] {
   );
 }
 
-function updateResumableLoopsWidget(ctx: ExtensionContext | ExtensionCommandContext): void {
+function clearResumableLoopsWidget(ctx: ExtensionContext | ExtensionCommandContext): void {
+  if (!ctx.hasUI) return;
+  ctx.ui.setWidget("multiloop-resume", undefined);
+}
+
+function announceResumableLoops(pi: ExtensionAPI, ctx: ExtensionContext): void {
+  clearResumableLoopsWidget(ctx);
   if (!ctx.hasUI) return;
 
   const loops = resumableLoops(ctx.cwd);
-  ctx.ui.setWidget(
-    "multiloop-resume",
-    loops.length > 0
-      ? (_tui, theme) => ({
-          render: () => buildResumableLoopsWidget(ctx.cwd, loops, {
-            title: (text) => theme.fg("mdHeading", theme.bold(text)),
-            rule: (text) => theme.fg("mdHr", text),
-            loopId: (text) => theme.fg("accent", text),
-            badge: (text) => theme.fg("muted", text),
-            goal: (text) => theme.fg("text", text),
-            command: (text) => theme.fg("syntaxFunction", text),
-            arrow: (text) => theme.fg("mdHr", text),
-            status: (text) => theme.fg("mdLink", text),
-            separator: (text) => theme.fg("mdHr", text),
-            muted: (text) => theme.fg("muted", text),
-          }),
-          invalidate: () => {},
-        })
-      : undefined
-  );
+  if (loops.length === 0) return;
+
+  pi.sendMessage({
+    customType: "multiloop-resume",
+    content: buildResumableLoopsNotice(ctx.cwd, loops).join("\n"),
+    display: true,
+  });
 }
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
-    updateResumableLoopsWidget(ctx);
+    announceResumableLoops(pi, ctx);
   });
 
   pi.on("input", async () => {
@@ -970,6 +963,6 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.setStatus("multiloop", undefined);
     }
 
-    updateResumableLoopsWidget(ctx);
+    clearResumableLoopsWidget(ctx);
   }
 }

@@ -229,7 +229,7 @@ Current behavior:
 
 ## Session startup lifecycle
 
-On `session_start`, pi-multiloop currently only updates the passive resumable-loops widget.
+On `session_start`, pi-multiloop currently prints a passive resumable-loops notice into chat history when detached active registry entries exist.
 
 It does **not**:
 

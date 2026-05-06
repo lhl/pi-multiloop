@@ -41,6 +41,7 @@ Currently manual publish via `npm publish`. textguard and shisad use GitHub Acti
 
 ## Ideas (no timeline)
 
+- One-line active-loop TUI element above the prompt, so attached/running loops remain visible without using the passive startup resume notice.
 - Composite modes (e.g., punchlist where each item is an optimize sub-loop)
 - `multiloop_iterate` persistence (save "attempt started" to disk for crash recovery)
 - Lane-level `.gitignore` hints (auto-suggest ignoring `.multiloop/` on first run)
