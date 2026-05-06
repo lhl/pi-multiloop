@@ -47,7 +47,7 @@ All state lives in a single `.multiloop/` directory at repo root:
 
 ### Pi Extension API Usage
 
-- Events: `session_start`, `before_agent_start`, `agent_end`
+- Events: `session_start`, `agent_start`, `session_compact`, `agent_end`, `before_agent_start`
 - Tools: `multiloop_iterate`, `multiloop_measure`, `multiloop_decide`, `multiloop_log`
 - Commands: `/multiloop` (with subcommands: status, ls, stop, pause, resume, archive, rm, help)
 - UI: Widget for lane status dashboard

@@ -17,6 +17,7 @@ Other loop extensions only support one loop per session or worktree. If you're t
 - **Flexible goals** — verify with any script or command you want
 - **Confidence scoring** — supports Median Absolute Deviation (MAD) to handle noisy benchmarks like GPU timing or training loss
 - **Durable history** — append-only JSONL per lane, survives context resets and restarts
+- **Compaction-aware resume** — when pi auto-compacts during an active loop, pi-multiloop injects a loop-aware resume prompt after the interrupted turn ends
 - **Escalation** — refines strategy automatically after consecutive failures
 - **TUI dashboard** — live status and metric history per lane
 
@@ -103,7 +104,8 @@ your-repo/
 2. **Each iteration** — Appends to `results.jsonl`, overwrites `state.json`.
 3. **`/multiloop stop`** — Updates status in both `state.json` and registry. Files stay on disk.
 4. **`/multiloop resume`** — Reconstructs in-memory state from `results.jsonl` + `state.json`. No new files until next iteration.
-5. **`/multiloop archive`** — Moves the run directory from `active/` to `archive/` with a timestamp prefix.
+5. **Auto-compaction during an active loop** — Marks the compacted turn for continuation; when the agent ends immediately after compaction, pi-multiloop sends a resume prompt grounded in the active `.multiloop/` state.
+6. **`/multiloop archive`** — Moves the run directory from `active/` to `archive/` with a timestamp prefix.
 
 ### Gitignore
 

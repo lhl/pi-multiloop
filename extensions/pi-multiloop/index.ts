@@ -40,6 +40,9 @@ import {
 import { MODES, detectMode } from "./modes.js";
 
 const activeStates = new Map<string, LoopState>();
+let agentRunning = false;
+let resumeAfterCompact = false;
+let lastCompactionEntryId: string | undefined;
 
 function stateKey(id: LaneId): string {
   return `${id.lane}/${id.runTag}`;
@@ -47,6 +50,31 @@ function stateKey(id: LaneId): string {
 
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }], details: {} };
+}
+
+function runningStates(): LoopState[] {
+  return Array.from(activeStates.values()).filter((state) => state.status === "running");
+}
+
+export function buildCompactionResumePrompt(
+  states: LoopState[],
+  compactionEntryId?: string
+): string {
+  const contexts = states.map((state) => buildIterationContext(state)).join("\n\n");
+  return [
+    "Continue active pi-multiloop work after context compaction.",
+    compactionEntryId ? `Compaction entry: ${compactionEntryId}` : undefined,
+    "",
+    "Do not start a new loop and do not ask for confirmation. Resume from the persisted .multiloop state exactly where the loop left off.",
+    "",
+    contexts,
+    "",
+    "Next:",
+    "- If an iteration was not in progress, call multiloop_iterate for the appropriate lane.",
+    "- Run the loop's verify command and guard command if present.",
+    "- Record results with multiloop_measure, then finish with multiloop_decide or multiloop_log.",
+    "- If state is ambiguous, inspect .multiloop/active/<lane>/<runTag>/state.json and results.jsonl before proceeding.",
+  ].filter((line): line is string => line !== undefined).join("\n");
 }
 
 function loopSummary(cwd: string, entry: RegistryEntry): string {
@@ -86,6 +114,44 @@ export default function (pi: ExtensionAPI) {
         `multiloop: ${activeStates.size} active loop${activeStates.size > 1 ? "s" : ""}`
       );
     }
+  });
+
+  pi.on("agent_start", async () => {
+    agentRunning = true;
+  });
+
+  pi.on("session_compact", async (event, ctx) => {
+    if (runningStates().length === 0) return;
+
+    // Manual /compact while idle should not restart the agent. Auto-compaction during
+    // an active multiloop turn can leave the agent at an idle prompt, so queue a
+    // loop-aware resume for the next agent_end.
+    if (!agentRunning && ctx.isIdle()) return;
+
+    resumeAfterCompact = true;
+    lastCompactionEntryId = event.compactionEntry.id;
+  });
+
+  pi.on("agent_end", async (_event, ctx) => {
+    agentRunning = false;
+
+    if (!resumeAfterCompact) return;
+    const compactionEntryId = lastCompactionEntryId;
+    resumeAfterCompact = false;
+    lastCompactionEntryId = undefined;
+
+    const states = runningStates();
+    if (states.length === 0 || ctx.hasPendingMessages()) return;
+
+    setTimeout(() => {
+      const latestStates = runningStates();
+      if (latestStates.length === 0) return;
+      try {
+        pi.sendUserMessage(buildCompactionResumePrompt(latestStates, compactionEntryId));
+      } catch (err) {
+        ctx.ui.notify(`multiloop resume after compact failed: ${(err as Error).message}`, "error");
+      }
+    }, 0);
   });
 
   pi.on("before_agent_start", async (event, _ctx) => {

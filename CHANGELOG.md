@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Add compaction-aware resume: if `session_compact` fires during an active multiloop turn and the agent then ends, pi-multiloop injects a loop-aware resume prompt grounded in active `.multiloop/` state instead of relying on a generic "continue".
+
 ## 0.1.1
 
 ### Commands
