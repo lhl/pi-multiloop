@@ -183,6 +183,8 @@ interface ResumableLoopsWidgetStyle {
   goal?: (text: string) => string;
   command?: (text: string) => string;
   arrow?: (text: string) => string;
+  status?: (text: string) => string;
+  separator?: (text: string) => string;
   muted?: (text: string) => string;
 }
 
@@ -206,14 +208,18 @@ export function buildResumableLoopsWidget(
   styles: ResumableLoopsWidgetStyle = {}
 ): string[] {
   const shown = loops.slice(0, 8);
-  const status = `${loops.length} active · detached`;
+  const status = [
+    styleText(styles, "status", `${loops.length} active`),
+    styleText(styles, "separator", "·"),
+    styleText(styles, "status", "detached"),
+  ].join(" ");
   const idColumnWidth = Math.min(
     48,
     Math.max(36, ...shown.map((loop) => `${loop.lane}/${loop.runTag}`.length + 8))
   );
 
   const lines = [
-    `${styleText(styles, "rule", "━━")} ${styleText(styles, "title", "pi-multiloop")} ${styleText(styles, "rule", "━━━━━━━━━━━━━━━━━━━━━━━━━━━")} ${styleText(styles, "muted", status)} ${styleText(styles, "rule", "━━")}`,
+    `${styleText(styles, "rule", "━━")} ${styleText(styles, "title", "pi-multiloop")} ${styleText(styles, "rule", "━━━━━━━━━━━━━━━━━━━━━━━━━━━")} ${status} ${styleText(styles, "rule", "━━")}`,
     "",
   ];
 
@@ -225,7 +231,7 @@ export function buildResumableLoopsWidget(
     const padding = " ".repeat(Math.max(2, idColumnWidth - id.length));
 
     lines.push(
-      `↳ ${styleText(styles, "loopId", id)}${padding}${styleText(styles, "badge", `[ ${mode} ]`)} ${styleText(styles, "badge", `[ ${iteration} ]`)}`
+      `${styleText(styles, "arrow", "↳")} ${styleText(styles, "loopId", id)}${padding}${styleText(styles, "badge", `[ ${mode} ]`)} ${styleText(styles, "badge", `[ ${iteration} ]`)}`
     );
 
     if (state?.goal) {
@@ -261,13 +267,15 @@ function updateResumableLoopsWidget(ctx: ExtensionContext | ExtensionCommandCont
     loops.length > 0
       ? (_tui, theme) => ({
           render: () => buildResumableLoopsWidget(ctx.cwd, loops, {
-            title: (text) => theme.fg("toolTitle", theme.bold(text)),
-            rule: (text) => theme.fg("dim", text),
+            title: (text) => theme.fg("mdHeading", theme.bold(text)),
+            rule: (text) => theme.fg("mdHr", text),
             loopId: (text) => theme.fg("accent", text),
             badge: (text) => theme.fg("muted", text),
-            goal: (text) => theme.fg("dim", text),
-            command: (text) => theme.fg("toolTitle", text),
-            arrow: (text) => theme.fg("success", text),
+            goal: (text) => theme.fg("text", text),
+            command: (text) => theme.fg("syntaxFunction", text),
+            arrow: (text) => theme.fg("mdHr", text),
+            status: (text) => theme.fg("mdLink", text),
+            separator: (text) => theme.fg("mdHr", text),
             muted: (text) => theme.fg("muted", text),
           }),
           invalidate: () => {},
