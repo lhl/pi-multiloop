@@ -1,3 +1,4 @@
+import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
@@ -188,6 +189,11 @@ interface ResumableLoopsNoticeStyle {
   muted?: (text: string) => string;
 }
 
+interface ResumableLoopsNoticeTheme {
+  fg?: (name: string, text: string) => string;
+  bold?: (text: string) => string;
+}
+
 function styleText(
   styles: ResumableLoopsNoticeStyle,
   key: keyof ResumableLoopsNoticeStyle,
@@ -200,6 +206,87 @@ function styleText(
 function truncateDisplay(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   return text.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
+}
+
+function themeFg(theme: ResumableLoopsNoticeTheme, name: string, text: string): string {
+  try {
+    return theme.fg?.(name, text) ?? text;
+  } catch {
+    return text;
+  }
+}
+
+function themeBold(theme: ResumableLoopsNoticeTheme, text: string): string {
+  try {
+    return theme.bold?.(text) ?? text;
+  } catch {
+    return text;
+  }
+}
+
+function noticeStyles(theme: ResumableLoopsNoticeTheme): ResumableLoopsNoticeStyle {
+  return {
+    title: (text) => themeFg(theme, "mdHeading", themeBold(theme, text)),
+    rule: (text) => themeFg(theme, "mdHr", text),
+    loopId: (text) => themeFg(theme, "accent", text),
+    badge: (text) => themeFg(theme, "muted", text),
+    goal: (text) => themeFg(theme, "text", text),
+    command: (text) => themeFg(theme, "syntaxFunction", text),
+    arrow: (text) => themeFg(theme, "mdHr", text),
+    status: (text) => themeFg(theme, "mdLink", text),
+    separator: (text) => themeFg(theme, "mdHr", text),
+    muted: (text) => themeFg(theme, "muted", text),
+  };
+}
+
+export function colorizeResumableLoopsNotice(content: string, theme: ResumableLoopsNoticeTheme): string {
+  const styles = noticeStyles(theme);
+  return content.split("\n").map((line) => {
+    const header = line.match(/^(━━) (pi-multiloop) (━+) (.+?) (━━)$/);
+    if (header) {
+      const status = header[4].split(" · ");
+      const styledStatus = status.length === 2
+        ? `${styleText(styles, "status", status[0])} ${styleText(styles, "separator", "·")} ${styleText(styles, "status", status[1])}`
+        : styleText(styles, "status", header[4]);
+      return [
+        styleText(styles, "rule", header[1]),
+        styleText(styles, "title", header[2]),
+        styleText(styles, "rule", header[3]),
+        styledStatus,
+        styleText(styles, "rule", header[5]),
+      ].join(" ");
+    }
+
+    const loop = line.match(/^( ·) (\S+)(\s+)(\[ [^\]]+ \]) (\[ [^\]]+ \])$/);
+    if (loop) {
+      return `${styleText(styles, "arrow", loop[1])} ${styleText(styles, "loopId", loop[2])}${loop[3]}${styleText(styles, "badge", loop[4])} ${styleText(styles, "badge", loop[5])}`;
+    }
+
+    const goal = line.match(/^(    )(".*")$/);
+    if (goal) return `${goal[1]}${styleText(styles, "goal", goal[2])}`;
+
+    const command = line.match(/^(❯)  (\/multiloop resume) (<lane\/run-tag>)$/);
+    if (command) {
+      return `${styleText(styles, "arrow", command[1])}  ${styleText(styles, "command", command[2])} ${styleText(styles, "loopId", command[3])}`;
+    }
+
+    if (line.trimStart().startsWith("…")) return styleText(styles, "muted", line);
+    return line;
+  }).join("\n");
+}
+
+function messageText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((part): part is { type: "text"; text: string } =>
+      typeof part === "object" &&
+      part !== null &&
+      (part as { type?: unknown }).type === "text" &&
+      typeof (part as { text?: unknown }).text === "string"
+    )
+    .map((part) => part.text)
+    .join("\n");
 }
 
 export function buildResumableLoopsNotice(
@@ -278,6 +365,13 @@ function announceResumableLoops(pi: ExtensionAPI, ctx: ExtensionContext): void {
 }
 
 export default function (pi: ExtensionAPI) {
+  pi.registerMessageRenderer("multiloop-resume", (message, _options, theme) =>
+    new Text(colorizeResumableLoopsNotice(messageText(message.content), {
+      fg: (name, text) => theme.fg(name as Parameters<typeof theme.fg>[0], text),
+      bold: (text) => theme.bold(text),
+    }), 0, 0)
+  );
+
   pi.on("session_start", async (_event, ctx) => {
     announceResumableLoops(pi, ctx);
   });

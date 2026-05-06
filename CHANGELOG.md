@@ -13,6 +13,7 @@
 ### Fixed
 - Re-arm compaction-aware resume after every auto-compaction. Pi threshold compaction is emitted after the extension `agent_end` hook, so the resume logic now sends after `session_compact` when it follows a recent active agent turn instead of waiting for a second `agent_end`.
 - Make the startup resumable-loops notice scroll with chat history instead of staying pinned as a persistent widget.
+- Render the startup resumable-loops notice with Pi theme colors instead of the default custom-message box.
 
 ## 0.1.1
 

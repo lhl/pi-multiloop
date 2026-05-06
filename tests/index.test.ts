@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsNotice, decideCompactionResumeTiming } from "../extensions/pi-multiloop/index.js";
+import { buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsNotice, colorizeResumableLoopsNotice, decideCompactionResumeTiming } from "../extensions/pi-multiloop/index.js";
 import { createInitialState } from "../extensions/pi-multiloop/state.js";
 
 function activeState() {
@@ -94,6 +94,25 @@ describe("buildResumableLoopsNotice", () => {
     expect(lines.join("\n")).toContain(" · perf/run-001");
     expect(lines.join("\n")).toContain("❯  /multiloop resume <lane/run-tag>");
     expect(lines.join("\n")).not.toContain("↳");
+  });
+
+  it("colorizes notice text for the custom message renderer", () => {
+    const lines = buildResumableLoopsNotice("/tmp", [{
+      lane: "perf",
+      runTag: "run-001",
+      mode: "optimize",
+      status: "active",
+      startedAt: "2026-05-06T00:00:00.000Z",
+      stateDir: ".multiloop/active/perf/run-001",
+    }]);
+    const styled = colorizeResumableLoopsNotice(lines.join("\n"), {
+      fg: (name, text) => `<${name}>${text}</${name}>`,
+      bold: (text) => `**${text}**`,
+    });
+
+    expect(styled).toContain("<mdHeading>**pi-multiloop**</mdHeading>");
+    expect(styled).toContain("<accent>perf/run-001</accent>");
+    expect(styled).toContain("<syntaxFunction>/multiloop resume</syntaxFunction>");
   });
 });
 
