@@ -1,5 +1,5 @@
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
   type LaneId,
   type RegistryEntry,
@@ -40,9 +40,13 @@ import {
 import { MODES, detectMode } from "./modes.js";
 
 const activeStates = new Map<string, LoopState>();
+const COMPACTION_RESUME_RECENT_MS = 5000;
 let agentRunning = false;
 let resumeAfterCompact = false;
 let lastCompactionEntryId: string | undefined;
+let pendingCompactionResumeTiming: CompactionResumeTiming | undefined;
+let lastActiveAgentEndAt = 0;
+let lastInputAt = 0;
 
 function stateKey(id: LaneId): string {
   return `${id.lane}/${id.runTag}`;
@@ -54,6 +58,63 @@ function textResult(text: string) {
 
 function runningStates(): LoopState[] {
   return Array.from(activeStates.values()).filter((state) => state.status === "running");
+}
+
+export type CompactionResumeTiming = "skip" | "after-current-agent-end" | "after-compaction";
+
+export interface CompactionResumeTimingInput {
+  hasRunningStates: boolean;
+  agentRunning: boolean;
+  isIdle: boolean;
+  now: number;
+  lastActiveAgentEndAt: number;
+  lastInputAt: number;
+  recentWindowMs?: number;
+}
+
+export function decideCompactionResumeTiming(input: CompactionResumeTimingInput): CompactionResumeTiming {
+  if (!input.hasRunningStates) return "skip";
+  if (input.agentRunning) return "after-current-agent-end";
+
+  const recentWindowMs = input.recentWindowMs ?? COMPACTION_RESUME_RECENT_MS;
+  const followsRecentInput =
+    input.lastInputAt > input.lastActiveAgentEndAt && input.now - input.lastInputAt <= recentWindowMs;
+  if (followsRecentInput) {
+    // Pi can compact before submitting a freshly typed/extension-injected prompt.
+    // In that case the prompt that caused the preflight compaction will continue
+    // normally, so injecting an additional resume would duplicate work.
+    return "skip";
+  }
+
+  const followsRecentAgentEnd =
+    input.lastActiveAgentEndAt > 0 && input.now - input.lastActiveAgentEndAt <= recentWindowMs;
+  if (followsRecentAgentEnd) return "after-compaction";
+
+  // Defensive fallback for compaction implementations that emit while the agent
+  // is still busy but before agent_start/agent_end bookkeeping has caught up.
+  if (!input.isIdle) return "after-current-agent-end";
+
+  // Manual /compact while idle should not restart the agent.
+  return "skip";
+}
+
+function queueCompactionResume(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  compactionEntryId?: string
+): void {
+  const states = runningStates();
+  if (states.length === 0 || ctx.hasPendingMessages()) return;
+
+  setTimeout(() => {
+    const latestStates = runningStates();
+    if (latestStates.length === 0) return;
+    try {
+      pi.sendUserMessage(buildCompactionResumePrompt(latestStates, compactionEntryId));
+    } catch (err) {
+      ctx.ui.notify(`multiloop resume after compact failed: ${(err as Error).message}`, "error");
+    }
+  }, 0);
 }
 
 export function buildCompactionResumePrompt(
@@ -116,23 +177,53 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
+  pi.on("input", async () => {
+    lastInputAt = Date.now();
+  });
+
   pi.on("agent_start", async () => {
     agentRunning = true;
   });
 
+  pi.on("session_before_compact", async (_event, ctx) => {
+    pendingCompactionResumeTiming = decideCompactionResumeTiming({
+      hasRunningStates: runningStates().length > 0,
+      agentRunning,
+      isIdle: ctx.isIdle(),
+      now: Date.now(),
+      lastActiveAgentEndAt,
+      lastInputAt,
+    });
+  });
+
   pi.on("session_compact", async (event, ctx) => {
-    if (runningStates().length === 0) return;
+    const timing = pendingCompactionResumeTiming ?? decideCompactionResumeTiming({
+      hasRunningStates: runningStates().length > 0,
+      agentRunning,
+      isIdle: ctx.isIdle(),
+      now: Date.now(),
+      lastActiveAgentEndAt,
+      lastInputAt,
+    });
+    pendingCompactionResumeTiming = undefined;
 
-    // Manual /compact while idle should not restart the agent. Auto-compaction during
-    // an active multiloop turn can leave the agent at an idle prompt, so queue a
-    // loop-aware resume for the next agent_end.
-    if (!agentRunning && ctx.isIdle()) return;
+    if (timing === "skip") return;
 
-    resumeAfterCompact = true;
-    lastCompactionEntryId = event.compactionEntry.id;
+    if (timing === "after-current-agent-end") {
+      resumeAfterCompact = true;
+      lastCompactionEntryId = event.compactionEntry.id;
+      return;
+    }
+
+    resumeAfterCompact = false;
+    lastCompactionEntryId = undefined;
+    queueCompactionResume(pi, ctx, event.compactionEntry.id);
   });
 
   pi.on("agent_end", async (_event, ctx) => {
+    if (runningStates().length > 0) {
+      lastActiveAgentEndAt = Date.now();
+    }
     agentRunning = false;
 
     if (!resumeAfterCompact) return;
@@ -140,18 +231,7 @@ export default function (pi: ExtensionAPI) {
     resumeAfterCompact = false;
     lastCompactionEntryId = undefined;
 
-    const states = runningStates();
-    if (states.length === 0 || ctx.hasPendingMessages()) return;
-
-    setTimeout(() => {
-      const latestStates = runningStates();
-      if (latestStates.length === 0) return;
-      try {
-        pi.sendUserMessage(buildCompactionResumePrompt(latestStates, compactionEntryId));
-      } catch (err) {
-        ctx.ui.notify(`multiloop resume after compact failed: ${(err as Error).message}`, "error");
-      }
-    }, 0);
+    queueCompactionResume(pi, ctx, compactionEntryId);
   });
 
   pi.on("before_agent_start", async (event, _ctx) => {

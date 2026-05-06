@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCompactionResumePrompt } from "../extensions/pi-multiloop/index.js";
+import { buildCompactionResumePrompt, decideCompactionResumeTiming } from "../extensions/pi-multiloop/index.js";
 import { createInitialState } from "../extensions/pi-multiloop/state.js";
 
 function activeState() {
@@ -19,6 +19,64 @@ function activeState() {
   state.bestMetric = 90;
   return state;
 }
+
+describe("decideCompactionResumeTiming", () => {
+  it("skips when no loops are running", () => {
+    expect(decideCompactionResumeTiming({
+      hasRunningStates: false,
+      agentRunning: false,
+      isIdle: true,
+      now: 10_000,
+      lastActiveAgentEndAt: 9_000,
+      lastInputAt: 1_000,
+    })).toBe("skip");
+  });
+
+  it("arms a resume for compaction that happens during an active agent turn", () => {
+    expect(decideCompactionResumeTiming({
+      hasRunningStates: true,
+      agentRunning: true,
+      isIdle: false,
+      now: 10_000,
+      lastActiveAgentEndAt: 0,
+      lastInputAt: 1_000,
+    })).toBe("after-current-agent-end");
+  });
+
+  it("sends a resume after auto-compaction that follows an active agent turn", () => {
+    expect(decideCompactionResumeTiming({
+      hasRunningStates: true,
+      agentRunning: false,
+      isIdle: true,
+      now: 10_000,
+      lastActiveAgentEndAt: 9_900,
+      lastInputAt: 1_000,
+    })).toBe("after-compaction");
+  });
+
+  it("skips manual idle compaction", () => {
+    expect(decideCompactionResumeTiming({
+      hasRunningStates: true,
+      agentRunning: false,
+      isIdle: true,
+      now: 10_000,
+      lastActiveAgentEndAt: 1_000,
+      lastInputAt: 500,
+      recentWindowMs: 100,
+    })).toBe("skip");
+  });
+
+  it("skips pre-prompt compaction because the submitted prompt will continue", () => {
+    expect(decideCompactionResumeTiming({
+      hasRunningStates: true,
+      agentRunning: false,
+      isIdle: true,
+      now: 10_000,
+      lastActiveAgentEndAt: 9_000,
+      lastInputAt: 9_950,
+    })).toBe("skip");
+  });
+});
 
 describe("buildCompactionResumePrompt", () => {
   it("builds a loop-aware resume prompt after compaction", () => {

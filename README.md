@@ -104,7 +104,7 @@ your-repo/
 2. **Each iteration** — Appends to `results.jsonl`, overwrites `state.json`.
 3. **`/multiloop stop`** — Updates status in both `state.json` and registry. Files stay on disk.
 4. **`/multiloop resume`** — Reconstructs in-memory state from `results.jsonl` + `state.json`. No new files until next iteration.
-5. **Auto-compaction during an active loop** — Marks the compacted turn for continuation; when the agent ends immediately after compaction, pi-multiloop sends a resume prompt grounded in the active `.multiloop/` state.
+5. **Auto-compaction during an active loop** — Sends a resume prompt grounded in active `.multiloop/` state after compaction, including the common Pi threshold path where compaction happens immediately after `agent_end`. Manual idle `/compact` does not restart the agent.
 6. **`/multiloop archive`** — Moves the run directory from `active/` to `archive/` with a timestamp prefix.
 
 ### Gitignore
