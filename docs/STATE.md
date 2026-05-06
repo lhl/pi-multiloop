@@ -326,20 +326,42 @@ Possible ways to clear it:
 - when the loop is paused/stopped/archived/deleted;
 - after a compaction resume prompt is sent or intentionally skipped.
 
-## Manual compaction mitigation ideas
+## Best compaction fix: expose reason upstream
 
-The robust fix is for Pi to expose compaction `reason` on extension events:
+The best solution is an upstream Pi extension API change: expose compaction `reason` on `session_before_compact` and `session_compact`.
+
+Pi core already knows this reason internally:
+
+- `manual`: user invoked `/compact`.
+- `threshold`: automatic compaction because context crossed the configured threshold.
+- `overflow`: automatic recovery after a provider context-overflow error.
+
+Today that reason is emitted on Pi's lower-level session stream, but it is not passed through to extension compaction events. That forces pi-multiloop to guess using timing, `agentRunning`, `lastInputAt`, and `customInstructions`.
+
+The upstream API should look roughly like:
 
 ```ts
-session_before_compact.reason // "manual" | "threshold" | "overflow"
-session_compact.reason        // "manual" | "threshold" | "overflow"
+type CompactionReason = "manual" | "threshold" | "overflow";
+
+session_before_compact.reason: CompactionReason
+session_compact.reason: CompactionReason
 ```
+
+Implementation shape in Pi core:
+
+- In manual `AgentSession.compact(customInstructions)`, emit extension events with `reason: "manual"`.
+- In `_runAutoCompaction(reason, willRetry)`, forward the existing `reason` argument into both extension events.
+- Update extension event TypeScript definitions and docs.
 
 Then pi-multiloop can define policy directly:
 
 - `threshold` or `overflow` during/following a loop-owned turn: resume;
 - `manual`: usually do not auto-resume unless the user explicitly asks;
 - `manual` with custom instructions: never auto-resume unless those instructions request it.
+
+This is cleaner than monkeypatching Pi internals or installing another `@mariozechner/pi-coding-agent` copy inside pi-multiloop. The active harness is the global `pi` CLI process; a package dependency copy would not change its runtime behavior. A monkeypatch may be possible for local experiments, but it would rely on private paths/prototypes and should not be pi-multiloop's shipped solution.
+
+## Manual compaction mitigation ideas
 
 A secondary sanity check would be to keep the last submitted user command and suppress auto-resume when it is `/compact` or starts with `/compact `. This would work only if Pi exposes built-in slash-command submissions to extensions, or if extension `input` starts firing before built-in command handling. In current interactive flow, built-in `/compact` is handled before `AgentSession.prompt()`, so pi-multiloop's `input` handler likely cannot see bare `/compact` today.
 
