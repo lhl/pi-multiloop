@@ -175,7 +175,43 @@ function loopSummary(cwd: string, entry: RegistryEntry): string {
   return parts.join(" — ");
 }
 
+export function buildResumableLoopsWidget(cwd: string, loops: RegistryEntry[]): string[] {
+  const shown = loops.slice(0, 8);
+  const lines = [
+    `pi-multiloop: ${loops.length} active loop${loops.length === 1 ? "" : "s"} available to resume (not attached)`,
+    ...shown.map((loop) => `  • ${loopSummary(cwd, loop)}`),
+  ];
+
+  if (loops.length > shown.length) {
+    lines.push(`  … ${loops.length - shown.length} more; run /multiloop ls`);
+  }
+
+  lines.push("Resume with /multiloop resume <lane/run-tag>");
+  return lines;
+}
+
+function resumableLoops(cwd: string): RegistryEntry[] {
+  const attached = new Set(Array.from(activeStates.values()).map((s) => `${s.lane}/${s.runTag}`));
+  return readRegistry(cwd).loops.filter(
+    (loop) => loop.status === "active" && !attached.has(`${loop.lane}/${loop.runTag}`)
+  );
+}
+
+function updateResumableLoopsWidget(ctx: ExtensionContext | ExtensionCommandContext): void {
+  if (!ctx.hasUI) return;
+
+  const loops = resumableLoops(ctx.cwd);
+  ctx.ui.setWidget(
+    "multiloop-resume",
+    loops.length > 0 ? buildResumableLoopsWidget(ctx.cwd, loops) : undefined
+  );
+}
+
 export default function (pi: ExtensionAPI) {
+  pi.on("session_start", async (_event, ctx) => {
+    updateResumableLoopsWidget(ctx);
+  });
+
   pi.on("input", async () => {
     lastInputAt = Date.now();
   });
@@ -847,7 +883,7 @@ export default function (pi: ExtensionAPI) {
     return null;
   }
 
-  function updateStatus(ctx: { ui: { setStatus(key: string, text: string | undefined): void } }) {
+  function updateStatus(ctx: ExtensionContext | ExtensionCommandContext) {
     if (activeStates.size > 0) {
       const summaries = Array.from(activeStates.values()).map(
         (s) => `${s.lane}#${s.iteration}`
@@ -856,5 +892,7 @@ export default function (pi: ExtensionAPI) {
     } else {
       ctx.ui.setStatus("multiloop", undefined);
     }
+
+    updateResumableLoopsWidget(ctx);
   }
 }

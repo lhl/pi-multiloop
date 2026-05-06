@@ -107,7 +107,7 @@ your-repo/
 5. **Auto-compaction during a current-session loop** — Sends a resume prompt grounded in active `.multiloop/` state after compaction, including the common Pi threshold path where compaction happens immediately after `agent_end`. Manual idle `/compact` does not restart the agent.
 6. **`/multiloop archive`** — Moves the run directory from `active/` to `archive/` with a timestamp prefix.
 
-pi-multiloop does **not** auto-attach persisted active loops when a new Pi session starts. Registry entries remain available on disk, but a loop becomes active in memory only after `/multiloop` starts it or `/multiloop resume <lane/run-tag>` resumes it in the current session.
+pi-multiloop does **not** auto-attach persisted active loops when a new Pi session starts. Registry entries remain available on disk, and startup shows a passive "available to resume" widget when resumable loops exist, but a loop becomes active in memory only after `/multiloop` starts it or `/multiloop resume <lane/run-tag>` resumes it in the current session.
 
 ### Gitignore
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCompactionResumePrompt, buildExplicitResumePrompt, decideCompactionResumeTiming } from "../extensions/pi-multiloop/index.js";
+import { buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsWidget, decideCompactionResumeTiming } from "../extensions/pi-multiloop/index.js";
 import { createInitialState } from "../extensions/pi-multiloop/state.js";
 
 function activeState() {
@@ -75,6 +75,23 @@ describe("decideCompactionResumeTiming", () => {
       lastActiveAgentEndAt: 9_000,
       lastInputAt: 9_950,
     })).toBe("skip");
+  });
+});
+
+describe("buildResumableLoopsWidget", () => {
+  it("lists resumable loops without implying attachment", () => {
+    const lines = buildResumableLoopsWidget("/tmp", [{
+      lane: "perf",
+      runTag: "run-001",
+      mode: "optimize",
+      status: "active",
+      startedAt: "2026-05-06T00:00:00.000Z",
+      stateDir: ".multiloop/active/perf/run-001",
+    }]);
+
+    expect(lines[0]).toContain("1 active loop available to resume (not attached)");
+    expect(lines.join("\n")).toContain("perf/run-001");
+    expect(lines.join("\n")).toContain("/multiloop resume <lane/run-tag>");
   });
 });
 
