@@ -231,7 +231,7 @@ export function buildResumableLoopsWidget(
     const padding = " ".repeat(Math.max(2, idColumnWidth - id.length));
 
     lines.push(
-      `${styleText(styles, "arrow", "↳")} ${styleText(styles, "loopId", id)}${padding}${styleText(styles, "badge", `[ ${mode} ]`)} ${styleText(styles, "badge", `[ ${iteration} ]`)}`
+      `${styleText(styles, "arrow", "-")} ${styleText(styles, "loopId", id)}${padding}${styleText(styles, "badge", `[ ${mode} ]`)} ${styleText(styles, "badge", `[ ${iteration} ]`)}`
     );
 
     if (state?.goal) {
@@ -245,7 +245,7 @@ export function buildResumableLoopsWidget(
 
   lines.push(
     "",
-    `${styleText(styles, "arrow", "→")}  ${styleText(styles, "command", "/multiloop resume")} ${styleText(styles, "loopId", "<lane/run-tag>")}`,
+    `${styleText(styles, "arrow", "❯")}  ${styleText(styles, "command", "/multiloop resume")} ${styleText(styles, "loopId", "<lane/run-tag>")}`,
     ""
   );
   return lines;

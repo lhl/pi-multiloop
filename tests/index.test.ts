@@ -91,8 +91,9 @@ describe("buildResumableLoopsWidget", () => {
 
     expect(lines[0]).toContain("pi-multiloop");
     expect(lines[0]).toContain("1 active · detached");
-    expect(lines.join("\n")).toContain("perf/run-001");
-    expect(lines.join("\n")).toContain("/multiloop resume <lane/run-tag>");
+    expect(lines.join("\n")).toContain("- perf/run-001");
+    expect(lines.join("\n")).toContain("❯  /multiloop resume <lane/run-tag>");
+    expect(lines.join("\n")).not.toContain("↳");
   });
 });
 
