@@ -3,7 +3,6 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@m
 import {
   type LaneId,
   type RegistryEntry,
-  getActiveLoops,
   getLoop,
   registerLoop,
   updateLoopStatus,
@@ -109,21 +108,23 @@ function queueCompactionResume(
   setTimeout(() => {
     const latestStates = runningStates();
     if (latestStates.length === 0) return;
+    if (ctx.hasPendingMessages()) return;
     try {
-      pi.sendUserMessage(buildCompactionResumePrompt(latestStates, compactionEntryId));
+      pi.sendUserMessage(buildCompactionResumePrompt(latestStates, compactionEntryId), { deliverAs: "followUp" });
     } catch (err) {
       ctx.ui.notify(`multiloop resume after compact failed: ${(err as Error).message}`, "error");
     }
   }, 0);
 }
 
-export function buildCompactionResumePrompt(
+function buildLoopResumePrompt(
+  heading: string,
   states: LoopState[],
   compactionEntryId?: string
 ): string {
   const contexts = states.map((state) => buildIterationContext(state)).join("\n\n");
   return [
-    "Continue active pi-multiloop work after context compaction.",
+    heading,
     compactionEntryId ? `Compaction entry: ${compactionEntryId}` : undefined,
     "",
     "Do not start a new loop and do not ask for confirmation. Resume from the persisted .multiloop state exactly where the loop left off.",
@@ -136,6 +137,21 @@ export function buildCompactionResumePrompt(
     "- Record results with multiloop_measure, then finish with multiloop_decide or multiloop_log.",
     "- If state is ambiguous, inspect .multiloop/active/<lane>/<runTag>/state.json and results.jsonl before proceeding.",
   ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+export function buildExplicitResumePrompt(states: LoopState[]): string {
+  return buildLoopResumePrompt("Resume active pi-multiloop work from persisted state.", states);
+}
+
+export function buildCompactionResumePrompt(
+  states: LoopState[],
+  compactionEntryId?: string
+): string {
+  return buildLoopResumePrompt(
+    "Continue active pi-multiloop work after context compaction.",
+    states,
+    compactionEntryId
+  );
 }
 
 function loopSummary(cwd: string, entry: RegistryEntry): string {
@@ -160,23 +176,6 @@ function loopSummary(cwd: string, entry: RegistryEntry): string {
 }
 
 export default function (pi: ExtensionAPI) {
-  pi.on("session_start", async (_event, ctx) => {
-    const loops = getActiveLoops(ctx.cwd);
-    for (const entry of loops) {
-      const id: LaneId = { lane: entry.lane, runTag: entry.runTag };
-      const state = reconstructState(ctx.cwd, id);
-      if (state && state.status === "running") {
-        activeStates.set(stateKey(id), state);
-      }
-    }
-    if (activeStates.size > 0) {
-      ctx.ui.setStatus(
-        "multiloop",
-        `multiloop: ${activeStates.size} active loop${activeStates.size > 1 ? "s" : ""}`
-      );
-    }
-  });
-
   pi.on("input", async () => {
     lastInputAt = Date.now();
   });
@@ -232,25 +231,6 @@ export default function (pi: ExtensionAPI) {
     lastCompactionEntryId = undefined;
 
     queueCompactionResume(pi, ctx, compactionEntryId);
-  });
-
-  pi.on("before_agent_start", async (event, _ctx) => {
-    if (activeStates.size === 0) return;
-
-    const contexts: string[] = [];
-    for (const state of activeStates.values()) {
-      contexts.push(buildIterationContext(state));
-    }
-
-    const append = [
-      "\n\n# Active Multiloop Loops\n",
-      ...contexts,
-      "\n\nUse the multiloop_iterate, multiloop_measure, and multiloop_decide tools to execute loop iterations.",
-    ].join("\n");
-
-    return {
-      systemPrompt: event.systemPrompt + append,
-    };
   });
 
   const IterateParams = Type.Object({
@@ -635,6 +615,7 @@ export default function (pi: ExtensionAPI) {
         updateLoopStatus(ctx.cwd, id, "active");
         updateStatus(ctx);
         ctx.ui.notify(`Resumed loop ${formatLaneId(id)} at iteration ${state.iteration}`, "info");
+        pi.sendUserMessage(buildExplicitResumePrompt([state]), { deliverAs: "followUp" });
         return;
       }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCompactionResumePrompt, decideCompactionResumeTiming } from "../extensions/pi-multiloop/index.js";
+import { buildCompactionResumePrompt, buildExplicitResumePrompt, decideCompactionResumeTiming } from "../extensions/pi-multiloop/index.js";
 import { createInitialState } from "../extensions/pi-multiloop/state.js";
 
 function activeState() {
@@ -75,6 +75,18 @@ describe("decideCompactionResumeTiming", () => {
       lastActiveAgentEndAt: 9_000,
       lastInputAt: 9_950,
     })).toBe("skip");
+  });
+});
+
+describe("buildExplicitResumePrompt", () => {
+  it("builds a loop-aware prompt for explicit resume", () => {
+    const prompt = buildExplicitResumePrompt([activeState()]);
+
+    expect(prompt).toContain("Resume active pi-multiloop work from persisted state.");
+    expect(prompt).toContain("## Active Loop: perf/run-001");
+    expect(prompt).toContain("Goal: improve inference latency");
+    expect(prompt).toContain("Verify: `./bench.py --quick`");
+    expect(prompt).toContain("Do not start a new loop");
   });
 });
 
