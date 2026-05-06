@@ -175,18 +175,73 @@ function loopSummary(cwd: string, entry: RegistryEntry): string {
   return parts.join(" — ");
 }
 
-export function buildResumableLoopsWidget(cwd: string, loops: RegistryEntry[]): string[] {
+interface ResumableLoopsWidgetStyle {
+  title?: (text: string) => string;
+  rule?: (text: string) => string;
+  loopId?: (text: string) => string;
+  badge?: (text: string) => string;
+  goal?: (text: string) => string;
+  command?: (text: string) => string;
+  arrow?: (text: string) => string;
+  muted?: (text: string) => string;
+}
+
+function styleText(
+  styles: ResumableLoopsWidgetStyle,
+  key: keyof ResumableLoopsWidgetStyle,
+  text: string
+): string {
+  const style = styles[key];
+  return style ? style(text) : text;
+}
+
+function truncateDisplay(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
+}
+
+export function buildResumableLoopsWidget(
+  cwd: string,
+  loops: RegistryEntry[],
+  styles: ResumableLoopsWidgetStyle = {}
+): string[] {
   const shown = loops.slice(0, 8);
+  const status = `${loops.length} active · detached`;
+  const idColumnWidth = Math.min(
+    48,
+    Math.max(36, ...shown.map((loop) => `${loop.lane}/${loop.runTag}`.length + 8))
+  );
+
   const lines = [
-    `pi-multiloop: ${loops.length} active loop${loops.length === 1 ? "" : "s"} available to resume (not attached)`,
-    ...shown.map((loop) => `  • ${loopSummary(cwd, loop)}`),
+    `${styleText(styles, "rule", "━━")} ${styleText(styles, "title", "pi-multiloop")} ${styleText(styles, "rule", "━━━━━━━━━━━━━━━━━━━━━━━━━━━")} ${styleText(styles, "muted", status)} ${styleText(styles, "rule", "━━")}`,
+    "",
   ];
 
-  if (loops.length > shown.length) {
-    lines.push(`  … ${loops.length - shown.length} more; run /multiloop ls`);
+  for (const loop of shown) {
+    const id = `${loop.lane}/${loop.runTag}`;
+    const state = loadState(cwd, { lane: loop.lane, runTag: loop.runTag });
+    const mode = state?.mode ?? loop.mode;
+    const iteration = state ? `${state.iteration} iter` : loop.status;
+    const padding = " ".repeat(Math.max(2, idColumnWidth - id.length));
+
+    lines.push(
+      `↳ ${styleText(styles, "loopId", id)}${padding}${styleText(styles, "badge", `[ ${mode} ]`)} ${styleText(styles, "badge", `[ ${iteration} ]`)}`
+    );
+
+    if (state?.goal) {
+      lines.push(`    ${styleText(styles, "goal", `"${truncateDisplay(state.goal, 64)}"`)}`);
+    }
   }
 
-  lines.push("Resume with /multiloop resume <lane/run-tag>");
+  if (loops.length > shown.length) {
+    lines.push(`  ${styleText(styles, "muted", `… ${loops.length - shown.length} more; run /multiloop ls`)}`);
+  }
+
+  lines.push(
+    "",
+    `${styleText(styles, "arrow", "→")}  ${styleText(styles, "command", "/multiloop resume")} ${styleText(styles, "loopId", "<lane/run-tag>")}`,
+    ""
+  );
   return lines;
 }
 
@@ -203,7 +258,21 @@ function updateResumableLoopsWidget(ctx: ExtensionContext | ExtensionCommandCont
   const loops = resumableLoops(ctx.cwd);
   ctx.ui.setWidget(
     "multiloop-resume",
-    loops.length > 0 ? buildResumableLoopsWidget(ctx.cwd, loops) : undefined
+    loops.length > 0
+      ? (_tui, theme) => ({
+          render: () => buildResumableLoopsWidget(ctx.cwd, loops, {
+            title: (text) => theme.fg("toolTitle", theme.bold(text)),
+            rule: (text) => theme.fg("dim", text),
+            loopId: (text) => theme.fg("accent", text),
+            badge: (text) => theme.fg("muted", text),
+            goal: (text) => theme.fg("dim", text),
+            command: (text) => theme.fg("toolTitle", text),
+            arrow: (text) => theme.fg("success", text),
+            muted: (text) => theme.fg("muted", text),
+          }),
+          invalidate: () => {},
+        })
+      : undefined
   );
 }
 

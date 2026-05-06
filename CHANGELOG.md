@@ -4,7 +4,7 @@
 
 ### Added
 - Add compaction-aware resume: if Pi compacts during or immediately after an active multiloop turn, pi-multiloop injects a loop-aware resume prompt grounded in active `.multiloop/` state instead of relying on a generic "continue".
-- Show a passive startup widget listing active loops available to resume without attaching them to the new session.
+- Show a styled passive startup widget listing active loops available to resume without attaching them to the new session.
 
 ### Changed
 - Stop auto-attaching persisted active loops on Pi `session_start`; `/multiloop resume <lane/run-tag>` is now required to reactivate an existing loop in a new session.

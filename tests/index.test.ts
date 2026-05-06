@@ -89,7 +89,8 @@ describe("buildResumableLoopsWidget", () => {
       stateDir: ".multiloop/active/perf/run-001",
     }]);
 
-    expect(lines[0]).toContain("1 active loop available to resume (not attached)");
+    expect(lines[0]).toContain("pi-multiloop");
+    expect(lines[0]).toContain("1 active · detached");
     expect(lines.join("\n")).toContain("perf/run-001");
     expect(lines.join("\n")).toContain("/multiloop resume <lane/run-tag>");
   });
