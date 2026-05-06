@@ -228,10 +228,10 @@ export function buildResumableLoopsWidget(
     const state = loadState(cwd, { lane: loop.lane, runTag: loop.runTag });
     const mode = state?.mode ?? loop.mode;
     const iteration = state ? `${state.iteration} iter` : loop.status;
-    const padding = " ".repeat(Math.max(2, idColumnWidth - id.length));
+    const padding = " ".repeat(Math.max(2, idColumnWidth - id.length + 4));
 
     lines.push(
-      `${styleText(styles, "arrow", "-")} ${styleText(styles, "loopId", id)}${padding}${styleText(styles, "badge", `[ ${mode} ]`)} ${styleText(styles, "badge", `[ ${iteration} ]`)}`
+      `${styleText(styles, "arrow", " ·")} ${styleText(styles, "loopId", id)}${padding}${styleText(styles, "badge", `[ ${mode} ]`)} ${styleText(styles, "badge", `[ ${iteration} ]`)}`
     );
 
     if (state?.goal) {
