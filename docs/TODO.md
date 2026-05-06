@@ -1,6 +1,6 @@
 # TODO
 
-Future work tracked here. Current version: 0.1.1.
+Future work tracked here. Current version: 0.2.0.
 
 ## v0.2 candidates
 
