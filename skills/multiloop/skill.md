@@ -56,4 +56,6 @@ The user can intervene at any time:
 
 ## Context Management
 
-Active loops inject their state into the system prompt automatically. If running multiple loops, each has its own lane with independent state. Don't mix up which loop you're iterating on — always specify the lane name in tool calls.
+pi-multiloop does not automatically inject active loop state into the system prompt and does not auto-resume persisted registry entries on session start. A loop becomes active in the current Pi session only after `/multiloop` starts it or `/multiloop resume lane/run-tag` resumes it.
+
+Loop state is supplied through explicit start/resume prompts, tool results, `/multiloop status`, and compaction-aware resume prompts when Pi compacts during an active current-session loop. If running multiple loops, each has its own lane with independent state. Do not mix up which loop you're iterating on; always specify the lane name in tool calls.
