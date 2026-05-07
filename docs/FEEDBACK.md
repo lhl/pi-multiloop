@@ -877,3 +877,157 @@ prompt-for-the-LLM, not a stop sign.
 - It doesn't introduce a "natural-language tool call" layer for
   *anything*; only the human-facing slash surface delegates. The
   agent-facing tool surface stays JSON-schemed.
+
+## Section 5 — Unified Cleanup Roadmap
+
+A second reviewer (Sonnet 4.5/5.5) read Sections 1-4 and proposed a
+different *batching* for the same items: smaller batches grouped by
+risk surface, with a clear publish gate. Their batching is better than
+the per-section "single PR" sketches in Sections 2-4 because it
+sequences the user-facing surprises before the architectural shifts and
+names the publish gate explicitly. This section reconciles the two
+proposals into a single ordered roadmap.
+
+### The four batches (with Section 4's items folded in)
+
+#### Batch 1 — Pre-publish surface cleanup
+
+Pure documentation + render fixes, no behavior change. Anchors the
+README to reality before the next npm push.
+
+- [ ] **Decide release target.** Compound verifiers (`2721e0b`),
+  mechanical continuation (`d8e46fb`), and guided setup (`151493b`) all
+  landed after the `0.2.0` bump (`ad56481`). Cut **0.3.0** when
+  Batches 1-2 + the atomic-state slice of Batch 3 are merged.
+  (Section 2 / "Things that look worse with history visible".)
+- [ ] **Update `docs/PLAN.md` checklist.** All 12 items in
+  `docs/PLAN.md:55-67` are checked off in code; mark them done so new
+  contributors don't read the project as unbuilt. (Section 1 / A4.)
+- [ ] **Wire the TUI dashboard or soften the README copy.** Either
+  call `formatDashboardText` from `/multiloop status` (preferred) or
+  drop "TUI dashboard" from `README.md:24` and `docs/PLAN.md` and
+  delete `ui.ts`. Don't leave dead code claimed as a feature.
+  (Section 1 / A1, Section 2.)
+- [ ] **Link `docs/STATE.md` and `docs/LOOP_GUIDE.md` from the README.**
+  Both are excellent and currently invisible. Add them to the README's
+  "How State Works" / "Setup" sections. (Section 1 / I23.)
+
+#### Batch 2 — Command / UX cleanup
+
+The most user-visible improvements. Lands the intent-first surface
+from Section 4 plus the inline-parser fixes 5.5 named.
+
+- [ ] **One target resolver for lane vs lane/run-tag.** Add
+  `parseLaneTarget(arg, { allowLaneOnly: true })` returning
+  `{ kind: "exact", id } | { kind: "lane", lane } | { kind: "ambiguous", input }`.
+  Use it in every subcommand. (Section 1 / B5; Section 4.5/4.6.)
+- [ ] **Lane-only resume / archive / pause when unambiguous.** When
+  `parseLaneTarget` returns `kind: "lane"` and exactly one matching
+  loop exists, act on it. (Section 1 / B6.) Keep `rm` strict — it's
+  destructive.
+- [ ] **Bare `/multiloop` becomes status-first.** Three buckets
+  (attached / resumable / inactive), descending by `lastUpdated`,
+  archive collapsed to a one-liner; only an empty registry routes
+  straight to the setup guide. (Section 4.1.)
+- [ ] **`/multiloop ls` reverse-chronological with archive collapse.**
+  Group by status; `--archived` flag expands. Empty case matches the
+  bare-`/multiloop` frame. (Section 4.2.)
+- [ ] **Fix the inline parser.** Three small repairs to keep it
+  working until Section 4.3 retires it:
+  - support single quotes in `extractQuotedOption`
+    (`index.ts:341-347`),
+  - strip parsed `verify:` / `guard:` / `prompt verifier:` / `acceptance:`
+    fragments from `goal: trimmed` before persisting
+    (`index.ts:1422`),
+  - default lane collision: when the inferred lane already has an
+    in-memory or registry-active loop, suffix with `-2`/`-3` or
+    force the guide path. (Section 1 / C8-C10.)
+- [ ] **Freeform input always goes through the guide.** Replace the
+  inline `startLoop` call with a guide follow-up that seeds the goal.
+  Delete `extractQuotedOption` once the guide path covers all
+  freeform input. Order this item *after* the inline-parser repairs
+  above so behavior is correct on the way to deletion. (Section 4.3.)
+- [ ] **Add typed tools for human ops.** `multiloop_resume`,
+  `_pause`, `_stop`, `_archive`, `_rm`. Thin wrappers over existing
+  internal helpers. (Section 4.4.) These are the prerequisite for the
+  next item.
+- [ ] **Slash arg-parse failure → LLM hand-off.** Replace the four
+  `ctx.ui.notify(..., "error")` paths with a disambiguation
+  follow-up that includes the registry snapshot and lets the LLM
+  call the right typed tool. (Section 4.5.)
+
+#### Batch 3 — Runtime hardening
+
+The first two items are the publish gate; the remaining two are the
+"the loop says no" surface that Section 2 named as the highest-leverage
+doc fix.
+
+- [ ] **Atomic `saveState`.** Write to temp + fsync + rename.
+  (Section 3 item 1; 5.5.)
+- [ ] **Snapshot counters.** Add `keeps`, `reverts`, `logs`,
+  `crashes`, `lastAction`, `lastUpdatedAction` to `LoopState`.
+  Surface in `/multiloop status`. (Section 3 item 2; 5.5.)
+- [ ] **`crash` / `blocked` result actions.** Extend
+  `IterationResult.action`, the decide-tool union, and the
+  acceptance/recommendedAction paths. (Section 3 item 5; 5.5.)
+- [ ] **"When the loop tells you no" doc.** One section in
+  `docs/LOOP_GUIDE.md` (or a new `docs/RUNTIME_REFUSALS.md`)
+  enumerating every refusal: measurement mismatch, missing-but-configured
+  guard / prompt verifier (synthetic-failed check), no-active-loop,
+  measured-but-not-decided iteration, escalation-exhausted stop. For
+  each: trigger, why, recovery. (Section 2 closing paragraph; 5.5.)
+
+#### Batch 4 — Mode semantics
+
+Defer to after publish. Decisions, not large code.
+
+- [ ] **Punchlist as log/progress mode by default.** In
+  `assessAcceptance` (`verifiers.ts:83-91`), treat `mode === "punchlist"`
+  the same as `research`/`dev` — `recommendedAction: "log"` —
+  unless the user explicitly attaches a metric direction. Only switch
+  to keep/revert when a metric verify command was supplied alongside
+  the checklist. (Section 1 / D11-D13; 5.5.)
+- [ ] **Wire `parsePunchlist` or document agent-driven.** Either:
+  call `punchlistProgress` inside `multiloop_log` for `punchlist`
+  mode and stop on `done === total`; or delete the parser helpers
+  and document explicitly that punchlist is "agent reads the file,
+  agent checks items off." Don't leave both half-done. (Section 1 /
+  D11; 5.5.)
+- [ ] **Optional follow-ons (no commitment yet).** Structured
+  lessons schema (Section 3 item 4), web-search escalation rung
+  (Section 3 item 6), typed resume-decision (Section 3 item 3), tool
+  description "phase hints" (Section 3 closing).
+
+### Publish gate for v0.3.0
+
+The minimum bar before the next npm cut:
+
+1. Batch 1 complete (docs/version match reality).
+2. Batch 2 complete (the user-visible surface is the new shape).
+3. From Batch 3: atomic `saveState` + snapshot counters merged.
+4. CHANGELOG closed out: `## 0.3.0 - 2026-MM-DD` with the
+   compound-verifier / mechanical-continuation / guided-setup entries
+   plus the Batch 1-2 changes.
+5. README quick-start updated to reflect the new bare-`/multiloop`
+   default and the LLM-routed disambiguation behavior.
+
+The remaining Batch 3 items (`crash`/`blocked` actions, "when the
+loop says no" doc) and all of Batch 4 land in 0.3.x.
+
+### Why this batching and not Section 4's
+
+Section 4's "PR A → E" order put typed tools before the bare-
+`/multiloop` rework. 5.5's batching puts the visible surface fixes
+together (Batch 2 = command/UX) and the durability fixes together
+(Batch 3 = runtime). That groups by the *kind of risk* each batch
+carries: Batch 1 is doc-only (zero risk), Batch 2 changes what users
+see (UX risk, low architectural risk), Batch 3 changes what's on disk
+(durability risk, no UX surface). It also makes the publish gate
+crisp — finish the user-visible story plus atomic state, cut 0.3.0,
+keep iterating.
+
+The ordering within Batch 2 still respects Section 4's dependency:
+typed tools (4.4) ship before the LLM hand-off (4.5) that depends on
+them. The inline-parser repairs come *before* the freeform-to-guide
+change so the parser is correct on its way out. Otherwise the items
+are independent enough to land in any order within their batch.
