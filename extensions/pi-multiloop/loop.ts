@@ -35,6 +35,24 @@ const PIVOT_THRESHOLD = 5;
 const MAX_PIVOTS = 2;
 const REANCHOR_INTERVAL = 10;
 
+export function failureEscalationDecision(state: LoopState): Pick<LoopDecision, "shouldEscalate" | "escalationType"> {
+  const escalation = checkEscalation(
+    state.consecutiveFailures + 1,
+    state.pivotCount
+  );
+
+  return {
+    shouldEscalate: escalation.consecutiveFailures >= REFINE_THRESHOLD,
+    escalationType: escalation.shouldStop
+      ? "stop"
+      : escalation.pivotCount > state.pivotCount
+        ? "pivot"
+        : escalation.consecutiveFailures >= REFINE_THRESHOLD
+          ? "refine"
+          : undefined,
+  };
+}
+
 export function decide(
   state: LoopState,
   measurement: ConfidenceResult,
@@ -64,22 +82,13 @@ export function decide(
     };
   }
 
-  const escalation = checkEscalation(
-    state.consecutiveFailures + 1,
-    state.pivotCount
-  );
+  const escalation = failureEscalationDecision(state);
 
   return {
     action: "revert",
     reason: `No improvement: ${formatDelta(baseline, measurement.median, state.metricDirection)}`,
-    shouldEscalate: escalation.consecutiveFailures >= REFINE_THRESHOLD,
-    escalationType: escalation.shouldStop
-      ? "stop"
-      : escalation.pivotCount > state.pivotCount
-        ? "pivot"
-        : escalation.consecutiveFailures >= REFINE_THRESHOLD
-          ? "refine"
-          : undefined,
+    shouldEscalate: escalation.shouldEscalate,
+    escalationType: escalation.escalationType,
   };
 }
 
@@ -131,6 +140,7 @@ export function applyDecision(
   hypothesis?: string,
   changes?: string
 ): LoopState {
+  const activeIteration = state.activeIteration;
   const result: IterationResult = {
     iteration: state.iteration + 1,
     timestamp: new Date().toISOString(),
@@ -144,6 +154,9 @@ export function applyDecision(
     hypothesis,
     changes,
     measurements: measurement.measurements,
+    checks: activeIteration?.checks,
+    acceptancePassed: activeIteration?.acceptancePassed,
+    acceptanceReason: activeIteration?.acceptanceReason,
   };
 
   appendResult(cwd, id, result);
@@ -168,6 +181,8 @@ export function applyDecision(
       state.consecutiveFailures = 0;
       appendLesson(cwd, id, `Pivot ${state.pivotCount}: Previous approach exhausted after ${PIVOT_THRESHOLD} failures.`);
     }
+  } else if (decision.action === "log") {
+    state.currentMetric = measurement.median;
   }
 
   if (decision.escalationType === "stop") {
@@ -210,6 +225,14 @@ export function buildIterationContext(state: LoopState): string {
   if (state.guardCommand) {
     lines.push(`Guard: \`${state.guardCommand}\``);
   }
+  if (state.promptVerifier) {
+    lines.push(`Prompt verifier: ${state.promptVerifier}`);
+  }
+  if (state.acceptancePolicy) {
+    lines.push(`Acceptance policy: ${state.acceptancePolicy}`);
+  } else if (state.guardCommand || state.promptVerifier) {
+    lines.push("Acceptance policy: metric must improve and all verification checks must pass");
+  }
   if (state.scope) {
     lines.push(`Scope: ${state.scope}`);
   }
@@ -221,6 +244,16 @@ export function buildIterationContext(state: LoopState): string {
     }
     if (state.activeIteration.phase === "measured") {
       lines.push(`Pending measurements: [${state.activeIteration.measurements?.join(", ") ?? ""}]`);
+      if (state.activeIteration.checks && state.activeIteration.checks.length > 0) {
+        const failed = state.activeIteration.checks.filter((check) => !check.passed).map((check) => check.name);
+        lines.push(`Pending checks: ${failed.length === 0 ? "all passed" : `failed ${failed.join(", ")}`}`);
+      }
+      if (state.activeIteration.acceptanceReason) {
+        const acceptanceStatus = state.activeIteration.acceptancePassed === undefined
+          ? "UNKNOWN"
+          : state.activeIteration.acceptancePassed ? "PASS" : "FAIL";
+        lines.push(`Acceptance: ${acceptanceStatus} — ${state.activeIteration.acceptanceReason}`);
+      }
       if (state.activeIteration.recommendedAction) {
         lines.push(`Pending decision: ${state.activeIteration.recommendedAction}`);
       }

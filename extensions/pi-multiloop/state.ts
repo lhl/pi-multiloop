@@ -2,6 +2,15 @@ import { readFileSync, writeFileSync, appendFileSync, existsSync } from "node:fs
 import { join } from "node:path";
 import { type LaneId, laneDir, ensureLaneDir } from "./lanes.js";
 
+export interface VerificationCheck {
+  name: string;
+  passed: boolean;
+  kind?: string;
+  command?: string;
+  prompt?: string;
+  evidence?: string;
+}
+
 export interface IterationResult {
   iteration: number;
   timestamp: string;
@@ -14,6 +23,9 @@ export interface IterationResult {
   changes?: string;
   error?: string;
   measurements?: number[];
+  checks?: VerificationCheck[];
+  acceptancePassed?: boolean;
+  acceptanceReason?: string;
 }
 
 export interface ActiveIteration {
@@ -24,6 +36,9 @@ export interface ActiveIteration {
   changes?: string;
   measurements?: number[];
   metric?: number;
+  checks?: VerificationCheck[];
+  acceptancePassed?: boolean;
+  acceptanceReason?: string;
   recommendedAction?: "keep" | "revert" | "log";
   measuredAt?: string;
 }
@@ -41,6 +56,8 @@ export interface LoopState {
   status: "running" | "paused" | "completed" | "stopped" | "archived";
   verifyCommand: string;
   guardCommand?: string;
+  promptVerifier?: string;
+  acceptancePolicy?: string;
   metricName?: string;
   metricDirection: "lower" | "higher";
   scope?: string;
@@ -171,6 +188,8 @@ export function createInitialState(
   verifyCommand: string,
   options: {
     guardCommand?: string;
+    promptVerifier?: string;
+    acceptancePolicy?: string;
     metricName?: string;
     metricDirection?: "lower" | "higher";
     scope?: string;
@@ -191,6 +210,8 @@ export function createInitialState(
     status: "running",
     verifyCommand,
     guardCommand: options.guardCommand,
+    promptVerifier: options.promptVerifier,
+    acceptancePolicy: options.acceptancePolicy,
     metricName: options.metricName,
     metricDirection: options.metricDirection ?? "lower",
     scope: options.scope,

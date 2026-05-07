@@ -5,6 +5,7 @@
 ### Added
 - Add loop-owned auto-continuation: after start/resume/tool turns, running loops queue the next required action instead of relying on the model to keep going after one decide/log.
 - Persist `activeIteration` markers in `state.json` so measured-but-not-decided iterations survive compaction/resume.
+- Support compound verifiers by recording mechanical/prompt checks with `multiloop_measure`; keep/revert recommendations now combine metric improvement with all-checks-pass acceptance.
 
 ### Fixed
 - Require `multiloop_decide` measurements to match the last recorded `multiloop_measure`, preventing unrecorded or stale verification decisions.

@@ -54,7 +54,7 @@ The snapshot also records iteration metrics:
 - `consecutiveFailures`: count used for escalation.
 - `pivotCount`: number of pivots used.
 - `verifyCommand` / `guardCommand`: commands the loop should run.
-- `activeIteration`: optional marker for the next iteration when it has started or has measured-but-not-decided results.
+- `activeIteration`: optional marker for the next iteration when it has started or has measured-but-not-decided results, including recorded mechanical/prompt checks and the acceptance verdict.
 
 ### Append-only result state
 
@@ -67,7 +67,7 @@ Each line records a completed iteration result:
 - `log`
 - `skip`
 
-This is the authoritative history for reconstructing iteration count and failure streaks. It does not record started-but-unfinished work; that lives in the snapshot's optional `activeIteration` marker until a result is appended.
+Rows also preserve metric measurements, optional verification checks, and the combined acceptance verdict. This is the authoritative history for reconstructing iteration count and failure streaks. It does not record started-but-unfinished work; that lives in the snapshot's optional `activeIteration` marker until a result is appended.
 
 ### Runtime attachment state
 
@@ -206,7 +206,8 @@ Current behavior:
 
 - If no baseline exists, establishes baseline/current/best metric and saves `state.json`.
 - Otherwise, reports whether the measurement improved relative to current baseline.
-- Writes `activeIteration.phase = "measured"`, the measurements, metric, and recommended keep/revert action to `state.json`.
+- Writes `activeIteration.phase = "measured"`, the measurements, metric, optional mechanical/prompt checks, acceptance verdict, and recommended keep/revert/log action to `state.json`.
+- If `guardCommand` or `promptVerifier` is configured but the check verdict is omitted, records a failed synthetic check so missing correctness verification cannot accidentally produce `keep`.
 - Does not append a result or increment iteration.
 
 ### `multiloop_decide`
@@ -215,7 +216,7 @@ Current behavior:
 
 - Assesses confidence.
 - Applies `keep`, `revert`, `log`, or `skip`.
-- Requires the provided measurements to match the recorded measured active iteration.
+- Requires the provided measurements and keep/revert action to match the recorded measured active iteration's combined acceptance result.
 - Appends one result to `results.jsonl`.
 - Increments `state.iteration`.
 - Clears `activeIteration` and saves `state.json`.

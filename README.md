@@ -15,6 +15,7 @@ Other loop extensions only support one loop per session or worktree. If you're t
   - **Dev** — implement, test, commit with iteration tracking
   - **Punchlist** — iterate through a checklist until everything is done
 - **Flexible goals** — verify with any script or command you want
+- **Compound verifiers** — combine a metric with mechanical guards and prompt-based correctness checks; keep is recommended only when the metric improves and all checks pass
 - **Confidence scoring** — supports Median Absolute Deviation (MAD) to handle noisy benchmarks like GPU timing or training loss
 - **Durable history** — append-only JSONL per lane, survives context resets and restarts
 - **Mechanical continuation** — loop-owned turns automatically queue the next required action while the loop remains running, so agents do not stop after a single decide/log status report
@@ -37,6 +38,9 @@ pi install npm:pi-multiloop
 # Specify verify command: "./bench.py --quick"
 # Confirm and go
 
+# Start a compound verifier loop: metric + mechanical correctness + prompt review
+/multiloop improve latency while completing docs/TODO.md, verify: `./bench.py --json`, guard: `npm test`, prompt verifier: `Review the generated output against fixtures; pass only if semantics are unchanged.`
+
 # Check status
 /multiloop status
 
@@ -55,7 +59,7 @@ pi install npm:pi-multiloop
 ## Modes
 
 ### Optimize
-Edit, measure, keep if improved or revert if not, repeat. Good for kernel tuning, performance work, training sweeps.
+Edit, measure, keep if improved or revert if not, repeat. Good for kernel tuning, performance work, training sweeps. If guard/prompt checks are configured or supplied to `multiloop_measure`, keep is recommended only when the metric improves **and** every check passes.
 
 ### Research
 Hypothesis, implement, measure, log results. All results are preserved for comparison rather than kept/reverted. Good for ablation studies and parameter sweeps.
@@ -65,6 +69,23 @@ Pick a task, implement, test, commit. General development with iteration trackin
 
 ### Punchlist
 Parse a markdown checklist, pick the next unchecked item, implement, verify, check it off. Done when all items pass.
+
+## Compound Verifiers
+
+`multiloop_measure` accepts optional verification checks alongside metric measurements:
+
+```json
+{
+  "lane": "perf",
+  "measurements": [356],
+  "checks": [
+    {"name": "unit tests", "kind": "mechanical", "passed": true, "command": "npm test"},
+    {"name": "output correctness", "kind": "prompt", "passed": true, "evidence": "Output preserves required semantics"}
+  ]
+}
+```
+
+For keep/revert modes, the recorded acceptance passes only when the metric improves and every check passes. If a loop was started with `guard:` or `prompt verifier:` and the agent omits the corresponding check verdict, pi-multiloop records that missing verifier as a failed check. `multiloop_decide` rejects mismatched decisions, so a faster-but-incorrect output is mechanically forced to `revert` unless the agent reruns verification and records a passing result.
 
 ## How State Works
 
@@ -96,13 +117,13 @@ your-repo/
 |---|---|---|
 | `registry.json` | Loop start/stop/archive | Index of all loops (lane, run-tag, mode, status, verify command). One file per repo. |
 | `state.json` | Every iteration + start/stop | Resume snapshot: iteration count, baseline, current/best metric, consecutive failures, pivot count, config, and any active measured-but-not-decided iteration. Overwritten each iteration. |
-| `results.jsonl` | Every iteration | Append-only log — one JSON line per iteration with: action (keep/revert/log), metric, baseline, delta, confidence, hypothesis, changes, measurements array. Never overwritten. |
+| `results.jsonl` | Every iteration | Append-only log — one JSON line per iteration with: action (keep/revert/log), metric, baseline, delta, confidence, hypothesis, changes, measurements array, verification checks, and acceptance verdict. Never overwritten. |
 | `lessons.md` | On pivot escalation | Freeform notes appended when the loop pivots strategy. Carried forward to bias future hypotheses. |
 
 ### Lifecycle
 
 1. **`/multiloop`** — Creates `.multiloop/` (if absent) with `registry.json` and `active/<lane>/<run-tag>/state.json`.
-2. **Each iteration** — `multiloop_iterate` records an active iteration marker in `state.json`; `multiloop_measure` records pending measurements; `multiloop_decide`/`multiloop_log` appends to `results.jsonl`, clears the active marker, and overwrites `state.json`.
+2. **Each iteration** — `multiloop_iterate` records an active iteration marker in `state.json`; `multiloop_measure` records pending measurements plus optional mechanical/prompt checks; `multiloop_decide`/`multiloop_log` appends to `results.jsonl`, clears the active marker, and overwrites `state.json`.
 3. **`/multiloop stop`** — Updates status in both `state.json` and registry. Files stay on disk.
 4. **`/multiloop resume`** — Explicitly reconstructs in-memory state from `results.jsonl` + `state.json` and sends a loop-aware resume prompt. No new files until next iteration.
 5. **Auto-continuation during a current-session loop** — After a loop-owned turn ends, if the loop is still `running` and no user message is pending, pi-multiloop sends a follow-up prompt for the next required action. If a measurement is pending, the prompt forces decide/log before new work.

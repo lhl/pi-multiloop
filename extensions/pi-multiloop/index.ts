@@ -31,6 +31,7 @@ import {
 } from "./metrics.js";
 import {
   decide,
+  failureEscalationDecision,
   applyDecision,
   shouldReanchor,
   reanchor,
@@ -38,6 +39,12 @@ import {
   buildEscalationPrompt,
 } from "./loop.js";
 import { MODES, detectMode } from "./modes.js";
+import {
+  assessAcceptance,
+  ensureRequiredChecks,
+  formatVerificationChecks,
+  normalizeVerificationChecks,
+} from "./verifiers.js";
 
 const activeStates = new Map<string, LoopState>();
 const COMPACTION_RESUME_RECENT_MS = 5000;
@@ -77,15 +84,23 @@ function activeIterationSummary(state: LoopState): string {
   }
 
   const active = state.activeIteration;
+  const promptCheck = state.promptVerifier ? " and run the prompt verifier" : "";
+  const checkInstruction = state.guardCommand || state.promptVerifier
+    ? " Include all mechanical/prompt check verdicts in multiloop_measure.checks."
+    : "";
+
   if (!active) {
-    return `- ${state.lane}/${state.runTag}: no iteration is in progress. Call multiloop_iterate, make one focused change, run verify${state.guardCommand ? " and guard" : ""}, then call multiloop_measure.`;
+    return `- ${state.lane}/${state.runTag}: no iteration is in progress. Call multiloop_iterate, make one focused change, run verify${state.guardCommand ? " and guard" : ""}${promptCheck}, then call multiloop_measure.${checkInstruction}`;
   }
 
   if (active.phase === "started") {
-    return `- ${state.lane}/${state.runTag}: iteration ${active.iteration} is started but not measured. Run verify \`${state.verifyCommand}\`${state.guardCommand ? ` and guard \`${state.guardCommand}\`` : ""}, then call multiloop_measure.`;
+    return `- ${state.lane}/${state.runTag}: iteration ${active.iteration} is started but not measured. Run verify \`${state.verifyCommand}\`${state.guardCommand ? ` and guard \`${state.guardCommand}\`` : ""}${promptCheck}, then call multiloop_measure.${checkInstruction}`;
   }
 
-  return `- ${state.lane}/${state.runTag}: iteration ${active.iteration} has measurements [${active.measurements?.join(", ") ?? ""}] and must be completed with multiloop_decide action="${active.recommendedAction ?? "log"}" before any status/final answer.`;
+  const acceptanceStatus = active.acceptancePassed === undefined
+    ? "UNKNOWN"
+    : active.acceptancePassed ? "PASS" : "FAIL";
+  return `- ${state.lane}/${state.runTag}: iteration ${active.iteration} has measurements [${active.measurements?.join(", ") ?? ""}] and acceptance ${acceptanceStatus}; complete it with multiloop_decide action="${active.recommendedAction ?? "log"}" before any status/final answer.`;
 }
 
 export type CompactionResumeTiming = "skip" | "after-current-agent-end" | "after-compaction";
@@ -188,8 +203,8 @@ function buildLoopResumePrompt(
     "- If baseline is missing, run the verify command and call multiloop_measure to persist it.",
     "- If an active iteration is measured, call multiloop_decide or multiloop_log with the recorded measurements before doing anything else.",
     "- If an iteration was not in progress, call multiloop_iterate for the appropriate lane.",
-    "- Run the loop's verify command and guard command if present.",
-    "- Record results with multiloop_measure, then finish with multiloop_decide or multiloop_log.",
+    "- Run the loop's verify command, guard command if present, and prompt verifier if configured.",
+    "- Record metric measurements and all mechanical/prompt check verdicts with multiloop_measure, then finish with multiloop_decide or multiloop_log.",
     "- If the loop is still running after decide/log, continue into the next iteration instead of summarizing.",
     "- If state is ambiguous, inspect .multiloop/active/<lane>/<runTag>/state.json and results.jsonl before proceeding.",
   ].filter((line): line is string => line !== undefined).join("\n");
@@ -218,8 +233,8 @@ export function buildAutoContinuePrompt(states: LoopState[]): string {
     "",
     "Hard contract:",
     "- Do not answer with a status report while any listed loop remains running.",
-    "- Complete the next mechanical loop action: verify/guard, multiloop_measure, then multiloop_decide or multiloop_log.",
-    "- A bash verify output alone is not recorded; persist measurements through multiloop_measure.",
+    "- Complete the next mechanical loop action: verify/guard/prompt verifier, multiloop_measure, then multiloop_decide or multiloop_log.",
+    "- A bash verify output alone is not recorded; persist measurements and all mechanical/prompt check verdicts through multiloop_measure.",
     "- After decide/log, continue into the next iteration unless the loop stops, is paused, or a true blocker prevents safe work.",
     "",
     contexts,
@@ -280,6 +295,14 @@ function styleText(
 function truncateDisplay(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   return text.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
+}
+
+function extractQuotedOption(input: string, labels: string[]): string | undefined {
+  const alternation = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const backtick = input.match(new RegExp(`(?:${alternation})[:\\s]+\\\`([^\\\`]+)\\\``, "i"));
+  if (backtick) return backtick[1];
+  const quoted = input.match(new RegExp(`(?:${alternation})[:\\s]+"([^"]+)"`, "i"));
+  return quoted?.[1];
 }
 
 function themeFg(theme: ResumableLoopsNoticeTheme, name: string, text: string): string {
@@ -590,6 +613,10 @@ export default function (pi: ExtensionAPI) {
           params.hypothesis ? `Hypothesis: ${params.hypothesis}` : "",
           `Run verify command: \`${state.verifyCommand}\``,
           state.guardCommand ? `Then run guard: \`${state.guardCommand}\`` : "",
+          state.promptVerifier ? `Then run prompt verifier: ${state.promptVerifier}` : "",
+          state.guardCommand || state.promptVerifier
+            ? "Pass every mechanical/prompt check verdict to multiloop_measure.checks."
+            : "",
         ]
           .filter(Boolean)
           .join("\n")
@@ -597,18 +624,30 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  const VerificationCheckParams = Type.Object({
+    name: Type.String({ description: "Check name, e.g. 'correctness', 'golden-output', or 'prompt-review'" }),
+    passed: Type.Boolean({ description: "Whether this verification check passed" }),
+    kind: Type.Optional(Type.String({ description: "Check kind: mechanical, prompt, guard, correctness, or other" })),
+    command: Type.Optional(Type.String({ description: "Command that produced this check, for mechanical checks" })),
+    prompt: Type.Optional(Type.String({ description: "Prompt/criterion used for prompt-based checks" })),
+    evidence: Type.Optional(Type.String({ description: "Short evidence or summary supporting the verdict" })),
+  });
+
   const MeasureParams = Type.Object({
     lane: Type.String({ description: "Lane identifier" }),
     measurements: Type.Array(Type.Number(), {
       description: "Array of metric measurements (run verify multiple times for confidence)",
     }),
+    checks: Type.Optional(Type.Array(VerificationCheckParams, {
+      description: "Optional mechanical/prompt verification checks. For compound verifiers, keep is recommended only when the metric improves and all checks pass.",
+    })),
   });
 
   pi.registerTool({
     name: "multiloop_measure",
     label: "Multiloop Measure",
     description:
-      "Record measurements from running the verify command. Pass multiple measurements for statistical confidence.",
+      "Record metric measurements and optional mechanical/prompt verification checks from the verify contract. Pass multiple measurements for statistical confidence.",
     parameters: MeasureParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       markLoopTurn("multiloop_measure");
@@ -623,6 +662,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       const confidence = assessConfidence(params.measurements);
+      const checks = ensureRequiredChecks(state, normalizeVerificationChecks(params.checks));
 
       if (state.baseline === null) {
         state.baseline = confidence.median;
@@ -632,22 +672,28 @@ export default function (pi: ExtensionAPI) {
         saveState(ctx.cwd, id, state);
         activeStates.set(stateKey(id), state);
 
-        return textResult(
-          [
-            `Baseline established for ${formatLaneId(id)}:`,
-            `  ${state.metricName ?? "Metric"}: ${confidence.median}`,
-            `  MAD: ${confidence.mad}`,
-            `  Confidence: ${confidenceLabel(confidence.confidence)}`,
-            `  Measurements: [${params.measurements.join(", ")}]`,
-            "",
-            "Baseline recorded. Start optimizing.",
-          ].join("\n")
-        );
+        const lines = [
+          `Baseline established for ${formatLaneId(id)}:`,
+          `  ${state.metricName ?? "Metric"}: ${confidence.median}`,
+          `  MAD: ${confidence.mad}`,
+          `  Confidence: ${confidenceLabel(confidence.confidence)}`,
+          `  Measurements: [${params.measurements.join(", ")}]`,
+        ];
+        if (checks.length > 0) {
+          lines.push("  Verification checks:");
+          lines.push(...formatVerificationChecks(checks));
+          if (!checks.every((check) => check.passed)) {
+            lines.push("  ⚠️ Baseline verification checks failed; fix the verifier/setup before optimizing.");
+          }
+        }
+        lines.push("", "Baseline recorded. Start optimizing.");
+
+        return textResult(lines.join("\n"));
       }
 
       const baseline = state.currentMetric ?? state.baseline;
       const improved = isImprovement(baseline, confidence.median, confidence.mad, state.metricDirection);
-      const recommendedAction = improved ? "keep" : "revert";
+      const acceptance = assessAcceptance(state, improved, checks);
       const activeIteration = state.activeIteration ?? {
         iteration: state.iteration + 1,
         phase: "started" as const,
@@ -658,25 +704,35 @@ export default function (pi: ExtensionAPI) {
         phase: "measured",
         measurements: confidence.measurements,
         metric: confidence.median,
-        recommendedAction,
+        checks: acceptance.checks,
+        acceptancePassed: acceptance.acceptancePassed,
+        acceptanceReason: acceptance.acceptanceReason,
+        recommendedAction: acceptance.recommendedAction,
         measuredAt: new Date().toISOString(),
       };
       saveState(ctx.cwd, id, state);
       activeStates.set(stateKey(id), state);
 
-      return textResult(
-        [
-          `Measurement for ${formatLaneId(id)}:`,
-          `  ${state.metricName ?? "Metric"}: ${confidence.median}`,
-          `  Baseline: ${baseline}`,
-          `  Delta: ${formatDelta(baseline, confidence.median, state.metricDirection)}`,
-          `  MAD: ${confidence.mad} | Confidence: ${confidenceLabel(confidence.confidence)}`,
-          `  Improved: ${improved ? "YES" : "NO"}`,
-          `  Recorded pending iteration: ${state.activeIteration.iteration}`,
-          "",
-          `Call multiloop_decide with action="${recommendedAction}" to proceed.`,
-        ].join("\n")
+      const lines = [
+        `Measurement for ${formatLaneId(id)}:`,
+        `  ${state.metricName ?? "Metric"}: ${confidence.median}`,
+        `  Baseline: ${baseline}`,
+        `  Delta: ${formatDelta(baseline, confidence.median, state.metricDirection)}`,
+        `  MAD: ${confidence.mad} | Confidence: ${confidenceLabel(confidence.confidence)}`,
+        `  Improved: ${improved ? "YES" : "NO"}`,
+      ];
+      if (acceptance.checks.length > 0) {
+        lines.push("  Verification checks:");
+        lines.push(...formatVerificationChecks(acceptance.checks));
+      }
+      lines.push(
+        `  Acceptance: ${acceptance.acceptancePassed ? "PASS" : "FAIL"} — ${acceptance.acceptanceReason}`,
+        `  Recorded pending iteration: ${state.activeIteration.iteration}`,
+        "",
+        `Call multiloop_decide with action="${acceptance.recommendedAction}" to proceed.`
       );
+
+      return textResult(lines.join("\n"));
     },
   });
 
@@ -697,7 +753,7 @@ export default function (pi: ExtensionAPI) {
     name: "multiloop_decide",
     label: "Multiloop Decide",
     description:
-      "Record keep/revert decision for current iteration. Updates state and logs the result.",
+      "Record the required keep/revert/log decision for the current measured iteration. Updates state and logs the result.",
     parameters: DecideParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       markLoopTurn("multiloop_decide");
@@ -735,25 +791,48 @@ export default function (pi: ExtensionAPI) {
         );
       }
 
+      const recommendedAction = state.activeIteration.recommendedAction;
+      if (recommendedAction && params.action !== recommendedAction) {
+        return textResult(
+          [
+            `Decision mismatch for ${formatLaneId(id)} iteration ${state.activeIteration.iteration}.`,
+            `Recorded acceptance: ${state.activeIteration.acceptancePassed === undefined ? "UNKNOWN" : state.activeIteration.acceptancePassed ? "PASS" : "FAIL"} — ${state.activeIteration.acceptanceReason ?? "no reason recorded"}`,
+            `Recorded checks: ${state.activeIteration.checks?.length ? state.activeIteration.checks.map((check) => `${check.passed ? "PASS" : "FAIL"} ${check.name}`).join(", ") : "none"}`,
+            `Required action from recorded verification: ${recommendedAction}`,
+            "Call multiloop_decide with the required action, or rerun verify and multiloop_measure to replace the recorded verification.",
+          ].join("\n")
+        );
+      }
+
       const confidence = assessConfidence(params.measurements);
       const baseline = state.currentMetric ?? state.baseline!;
 
+      const acceptanceSuffix = state.activeIteration.acceptanceReason
+        ? ` (${state.activeIteration.acceptanceReason})`
+        : "";
       const decision = {
         action: params.action as "keep" | "revert" | "log" | "skip",
         reason: params.action === "keep"
-          ? `Kept: ${formatDelta(baseline, confidence.median, state.metricDirection)}`
+          ? `Kept: ${formatDelta(baseline, confidence.median, state.metricDirection)}${acceptanceSuffix}`
           : params.action === "revert"
-            ? `Reverted: ${formatDelta(baseline, confidence.median, state.metricDirection)}`
-            : `Logged: ${confidence.median}`,
+            ? `Reverted: ${formatDelta(baseline, confidence.median, state.metricDirection)}${acceptanceSuffix}`
+            : `Logged: ${confidence.median}${acceptanceSuffix}`,
         shouldEscalate: false,
         escalationType: undefined as "refine" | "pivot" | "stop" | undefined,
       };
 
       if (params.action === "revert") {
         const esc = decide(state, confidence, baseline);
-        decision.shouldEscalate = esc.shouldEscalate;
-        decision.escalationType = esc.escalationType;
+        const effectiveEscalation = esc.action === "revert"
+          ? esc
+          : failureEscalationDecision(state);
+        decision.shouldEscalate = effectiveEscalation.shouldEscalate;
+        decision.escalationType = effectiveEscalation.escalationType;
       }
+
+      const decidedChecks = state.activeIteration.checks ?? [];
+      const decidedAcceptancePassed = state.activeIteration.acceptancePassed;
+      const decidedAcceptanceReason = state.activeIteration.acceptanceReason;
 
       state = applyDecision(
         ctx.cwd,
@@ -774,6 +853,16 @@ export default function (pi: ExtensionAPI) {
         `  ${state.metricName ?? "Metric"}: ${confidence.median}`,
         `  Consecutive failures: ${state.consecutiveFailures}`,
       ];
+      if (decidedChecks.length > 0) {
+        lines.push("  Verification checks:");
+        lines.push(...formatVerificationChecks(decidedChecks));
+      }
+      if (decidedAcceptanceReason) {
+        const decidedAcceptanceStatus = decidedAcceptancePassed === undefined
+          ? "UNKNOWN"
+          : decidedAcceptancePassed ? "PASS" : "FAIL";
+        lines.push(`  Acceptance: ${decidedAcceptanceStatus} — ${decidedAcceptanceReason}`);
+      }
 
       if (decision.shouldEscalate && decision.escalationType) {
         lines.push("");
@@ -816,26 +905,43 @@ export default function (pi: ExtensionAPI) {
         return textResult(`No state for lane "${params.lane}".`);
       }
 
+      const activeIteration = state.activeIteration;
+      const metric = params.metric ?? activeIteration?.metric;
       appendResult(ctx.cwd, id, {
         iteration: state.iteration + 1,
         timestamp: new Date().toISOString(),
         action: "log",
-        metric: params.metric,
-        hypothesis: params.note,
+        metric,
+        hypothesis: params.note ?? activeIteration?.hypothesis,
+        measurements: activeIteration?.measurements,
+        checks: activeIteration?.checks,
+        acceptancePassed: activeIteration?.acceptancePassed,
+        acceptanceReason: activeIteration?.acceptanceReason,
       });
 
       state.iteration++;
       delete state.activeIteration;
-      if (params.metric !== undefined) {
-        state.currentMetric = params.metric;
+      if (metric !== undefined) {
+        state.currentMetric = metric;
       }
       saveState(ctx.cwd, id, state);
       activeStates.set(stateKey(id), state);
       updateStatus(ctx);
 
-      return textResult(
-        `Logged iteration ${state.iteration} for ${formatLaneId(id)}.${params.metric !== undefined ? ` Metric: ${params.metric}` : ""}\nLoop is still running; pi-multiloop will continue to the next required action automatically.`
-      );
+      const lines = [`Logged iteration ${state.iteration} for ${formatLaneId(id)}.${metric !== undefined ? ` Metric: ${metric}` : ""}`];
+      if (activeIteration?.checks?.length) {
+        lines.push("Verification checks:");
+        lines.push(...formatVerificationChecks(activeIteration.checks));
+      }
+      if (activeIteration?.acceptanceReason) {
+        const acceptanceStatus = activeIteration.acceptancePassed === undefined
+          ? "UNKNOWN"
+          : activeIteration.acceptancePassed ? "PASS" : "FAIL";
+        lines.push(`Acceptance: ${acceptanceStatus} — ${activeIteration.acceptanceReason}`);
+      }
+      lines.push("Loop is still running; pi-multiloop will continue to the next required action automatically.");
+
+      return textResult(lines.join("\n"));
     },
   });
 
@@ -1134,6 +1240,7 @@ export default function (pi: ExtensionAPI) {
             "",
             "To start a new loop, just describe your goal after /multiloop. For example:",
             '  /multiloop improve inference latency, verify: `./bench.py --quick`',
+            '  /multiloop improve speed safely, verify: `./bench.py`, guard: `npm test`, prompt verifier: `Check output semantics against fixtures.`',
             "",
             "If you need help setting one up, just ask — describe what you want to",
             "optimize, research, or build and the agent will configure the loop for you.",
@@ -1149,15 +1256,25 @@ export default function (pi: ExtensionAPI) {
       const lane = laneParts?.[1] ?? mode;
 
       const id: LaneId = { lane, runTag };
-      const verifyParts = trimmed.match(/verify[:\s]+`([^`]+)`/i) ??
-        trimmed.match(/verify[:\s]+"([^"]+)"/i);
-      const verifyCommand = verifyParts?.[1] ?? "echo 'TODO: set verify command'";
-
-      const guardParts = trimmed.match(/guard[:\s]+`([^`]+)`/i) ??
-        trimmed.match(/guard[:\s]+"([^"]+)"/i);
+      const verifyCommand = extractQuotedOption(trimmed, ["verify"]) ?? "echo 'TODO: set verify command'";
+      const guardCommand = extractQuotedOption(trimmed, ["guard", "correctness", "correctness command"]);
+      const promptVerifier = extractQuotedOption(trimmed, [
+        "prompt verifier",
+        "prompt-verifier",
+        "verifier prompt",
+        "prompt check",
+        "prompt-check",
+        "correctness prompt",
+      ]);
+      const acceptancePolicy = extractQuotedOption(trimmed, ["acceptance", "acceptance policy", "accept"])
+        ?? (guardCommand || promptVerifier
+          ? "metric must improve and all mechanical/prompt verification checks must pass"
+          : undefined);
 
       const state = createInitialState(id, mode, verifyCommand, {
-        guardCommand: guardParts?.[1],
+        guardCommand,
+        promptVerifier,
+        acceptancePolicy,
         goal: trimmed,
         metricDirection: MODES[mode].defaultDirection,
       });
@@ -1173,7 +1290,7 @@ export default function (pi: ExtensionAPI) {
         startedAt: state.startedAt,
         stateDir: `.multiloop/active/${id.lane}/${id.runTag}`,
         verifyCommand,
-        guardCommand: guardParts?.[1],
+        guardCommand,
       };
       registerLoop(ctx.cwd, entry);
 
@@ -1185,7 +1302,9 @@ export default function (pi: ExtensionAPI) {
         [
           `New ${mode} loop started: ${formatLaneId(id)}`,
           `Verify: \`${verifyCommand}\``,
-          guardParts?.[1] ? `Guard: \`${guardParts[1]}\`` : null,
+          guardCommand ? `Guard: \`${guardCommand}\`` : null,
+          promptVerifier ? `Prompt verifier: ${promptVerifier}` : null,
+          acceptancePolicy ? `Acceptance: ${acceptancePolicy}` : null,
           `Goal: ${trimmed}`,
           "",
           "Run the verify command to establish a baseline, call multiloop_measure to persist it, then keep iterating until the loop is stopped/paused or a true blocker occurs.",

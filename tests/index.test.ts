@@ -9,6 +9,8 @@ function activeState() {
     "./bench.py --quick",
     {
       guardCommand: "npm test",
+      promptVerifier: "Review output for semantic equivalence to the baseline fixture.",
+      acceptancePolicy: "metric improves and output remains correct",
       goal: "improve inference latency",
       metricDirection: "lower",
     }
@@ -173,6 +175,8 @@ describe("buildCompactionResumePrompt", () => {
     expect(prompt).toContain("Goal: improve inference latency");
     expect(prompt).toContain("Verify: `./bench.py --quick`");
     expect(prompt).toContain("Guard: `npm test`");
+    expect(prompt).toContain("Prompt verifier: Review output for semantic equivalence");
+    expect(prompt).toContain("metric improves and output remains correct");
     expect(prompt).toContain("multiloop_iterate");
     expect(prompt).toContain("multiloop_measure");
     expect(prompt).toContain("multiloop_decide or multiloop_log");

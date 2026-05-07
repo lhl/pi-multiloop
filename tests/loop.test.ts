@@ -15,6 +15,7 @@ import {
   createInitialState,
   saveState,
   loadState,
+  readResults,
 } from "../extensions/pi-multiloop/state.js";
 import type { LaneId } from "../extensions/pi-multiloop/lanes.js";
 import type { ConfidenceResult } from "../extensions/pi-multiloop/metrics.js";
@@ -165,7 +166,20 @@ describe("decide", () => {
 
 describe("applyDecision", () => {
   it("increments iteration and saves result on keep", () => {
-    const state = makeState();
+    const state = makeState({
+      activeIteration: {
+        iteration: 1,
+        phase: "measured",
+        startedAt: "2026-05-07T00:00:00.000Z",
+        measurements: [85],
+        metric: 85,
+        checks: [{ name: "correctness", kind: "prompt", passed: true, evidence: "looks good" }],
+        acceptancePassed: true,
+        acceptanceReason: "metric improved; all checks passed",
+        recommendedAction: "keep",
+        measuredAt: "2026-05-07T00:01:00.000Z",
+      },
+    });
     saveState(cwd, id, state);
 
     const result = applyDecision(cwd, id, state, {
@@ -184,6 +198,10 @@ describe("applyDecision", () => {
     expect(saved).not.toBeNull();
     expect(saved!.iteration).toBe(1);
     expect(saved!.currentMetric).toBe(85);
+    const rows = readResults(cwd, id);
+    expect(rows[0].checks).toEqual([{ name: "correctness", kind: "prompt", passed: true, evidence: "looks good" }]);
+    expect(rows[0].acceptancePassed).toBe(true);
+    expect(rows[0].acceptanceReason).toBe("metric improved; all checks passed");
   });
 
   it("updates bestMetric correctly for lower-is-better", () => {
