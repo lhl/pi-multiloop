@@ -171,6 +171,84 @@ export function parseLaneId(input: string): LaneId | null {
   return validateLaneId(id) ? null : id;
 }
 
+export type TargetResolution =
+  | { status: "empty" }
+  | { status: "resolved"; id: LaneId; entry: RegistryEntry; matchedBy: "exact" | "lane" }
+  | { status: "invalid"; input: string; message: string }
+  | { status: "unknown"; input: string; message: string }
+  | { status: "ambiguous"; input: string; matches: RegistryEntry[]; message: string };
+
+export interface ResolveLoopTargetOptions {
+  statuses?: RegistryEntry["status"][];
+}
+
+function statusAllowed(entry: RegistryEntry, statuses?: RegistryEntry["status"][]): boolean {
+  return statuses === undefined || statuses.includes(entry.status);
+}
+
+export function resolveLoopTarget(
+  loops: RegistryEntry[],
+  input: string,
+  options: ResolveLoopTargetOptions = {}
+): TargetResolution {
+  const trimmed = input.trim();
+  if (!trimmed) return { status: "empty" };
+
+  const exact = parseLaneId(trimmed);
+  if (exact) {
+    const entry = loops.find((loop) => loop.lane === exact.lane && loop.runTag === exact.runTag);
+    if (!entry || !statusAllowed(entry, options.statuses)) {
+      return {
+        status: "unknown",
+        input: trimmed,
+        message: `No matching loop found for ${formatLaneId(exact)}.`,
+      };
+    }
+    return { status: "resolved", id: exact, entry, matchedBy: "exact" };
+  }
+
+  if (trimmed.includes("/")) {
+    return {
+      status: "invalid",
+      input: trimmed,
+      message: `Invalid lane/run-tag: "${trimmed}". Format: lane/run-tag with safe identifier parts.`,
+    };
+  }
+
+  if (validateLaneId({ lane: trimmed, runTag: "run" }) !== null) {
+    return {
+      status: "invalid",
+      input: trimmed,
+      message: `Invalid lane: "${trimmed}". Use letters, numbers, dots, underscores, or hyphens.`,
+    };
+  }
+
+  const matches = loops.filter((loop) => loop.lane === trimmed && statusAllowed(loop, options.statuses));
+  if (matches.length === 1) {
+    const entry = matches[0];
+    return {
+      status: "resolved",
+      id: { lane: entry.lane, runTag: entry.runTag },
+      entry,
+      matchedBy: "lane",
+    };
+  }
+  if (matches.length > 1) {
+    return {
+      status: "ambiguous",
+      input: trimmed,
+      matches,
+      message: `Lane "${trimmed}" matches ${matches.length} loops. Use exact lane/run-tag.`,
+    };
+  }
+
+  return {
+    status: "unknown",
+    input: trimmed,
+    message: `No matching loop found for lane "${trimmed}".`,
+  };
+}
+
 export function formatLaneId(id: LaneId): string {
   return `${id.lane}/${id.runTag}`;
 }
