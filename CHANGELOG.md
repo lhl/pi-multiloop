@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 - 2026-05-08
 
-_No unreleased changes._
+### Changed
+- Update peerDependencies to `@earendil-works/*` scope (Pi 0.74.0+)
+- Update imports to use `@earendil-works/pi-tui` and `@earendil-works/pi-coding-agent`
 
 ## 0.3.0 - 2026-05-08
 
