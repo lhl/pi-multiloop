@@ -242,3 +242,153 @@ For balance — these are the parts that read clean on a first pass:
 - **The startup resume notice with theme-aware coloring** is a nice
   passive-but-discoverable surface; not auto-attaching loops on session
   start is the right default.
+
+## Section 2 — Contrast With Iteration History (2026-05-07)
+
+After writing Section 1, I read `git log` from the scaffold (`72ecc86`) up
+through the most recent feature (`151493b feat: add guided loop setup`) to
+see how the project actually got here. Several Section 1 items read very
+differently with that history in hand: some are old design choices the team
+already debated and resolved, some are gaps that successive fixes deepened
+rather than closed, and a few are problems the iteration arc itself created.
+
+The repo is ~5 calendar days old. The arc has three rough phases:
+
+- **2026-05-03 — scaffold + 0.1.x stabilization.** Initial extension lands
+  (`9c23856`), then a long same-day burst of fixes: rename tools/commands
+  from `autoloop_*` → `multiloop_*` (`94da6fe`), consolidate state into
+  `.multiloop/` (`2f9ff1d`), fold separate `/multiloop-status` and
+  `/multiloop-archive` commands into `/multiloop` subcommands (`1143e7e`),
+  drop the original setup wizard skill in favour of help text for bare
+  `/multiloop` (`0dc424a`), then a row of small correctness fixes through
+  `3dceac7`.
+- **2026-05-06 — compaction & resume saga.** Three successive fixes
+  (`5c40bca` → `b4603b0` → `426da38`) and a 362-line design doc
+  (`d733049 docs/STATE.md`). The default flips from "auto-attach registry
+  loops on session_start" to "explicit `/multiloop resume` required", with a
+  passive notice (`1afcbf7`) replacing the silent attachment. Widget polish
+  follows.
+- **2026-05-07 — v0.2 features.** Mechanical auto-continuation
+  (`d8e46fb`), compound verification checks (`2721e0b`), guided loop setup
+  with the new `multiloop_start` tool (`151493b`).
+
+### What the history changes about Section 1
+
+**The complexity of `loopTurnActive` (Section 1 / G) is the answer, not the
+problem.** `d8e46fb fix: mechanically continue active loops` exists
+specifically because, before that commit, the agent would record one
+`multiloop_decide` and then summarize and stop. Auto-continuation, the
+ownership flag, and the `shouldContinueAfterUserInput` regex are the price
+of fixing that. So my initial framing was off: the heuristic isn't bloat,
+it's load-bearing. The fair concern is narrower — that the regex is
+keyword-restricted and the only graceful "stop here for a moment" path is
+an explicit `/multiloop pause`. That refinement is real but smaller than
+"this code is intricate."
+
+**The three-doc duplication (Section 1 / E) is one day old, not legacy
+drift.** `skills/multiloop/skill.md` and `extensions/pi-multiloop/index.ts`
+have been in step for most of the repo's life. `docs/LOOP_GUIDE.md` was
+introduced *in the same commit* as the guide flow (`151493b`, today), and
+that commit also rewrote `buildSetupGuidePrompt`. So the three sources of
+truth started as one feature ship and haven't been reconciled yet — the fix
+is a same-week followup rather than a longstanding tech-debt project.
+
+**The "TUI dashboard" gap (Section 1 / A1) has been dead code since the
+scaffold.** `ui.ts` was committed in `9c23856` (the first feature commit)
+with the full table renderer, and nothing has imported it in the four days
+since. Same story for the punchlist parser in `modes.ts` (Section 1 / D11).
+This is the strongest "open promise" in the repo — both files have been
+sitting unused through every refactor. Either they should be wired in or
+deleted. The README/PLAN copy that mentions them should match whichever
+choice wins.
+
+**Auto-attach-on-startup was already debated and reversed.** Commit
+`426da38 fix: require explicit multiloop resume` deliberately removed
+`getActiveLoops()` from `session_start` and added an explicit follow-up
+prompt path. The follow-on `1afcbf7 feat: show resumable multiloops on
+startup` then added the passive notice. So "loop becomes active in memory
+only after `/multiloop resume`" is intentional and recent — the README
+copy I flagged as worth surfacing already reflects the new default. Good;
+no change needed.
+
+**Compaction-aware resume went through three iterations to land.**
+`5c40bca` → `b4603b0` → `426da38`, all named "fix" rather than "feat".
+`d733049 docs/STATE.md` reads as the after-action analysis of those three
+fixes. The honest acknowledgement in STATE.md that the *real* fix is an
+upstream Pi API change exposing `CompactionReason` is the right framing,
+and means Section 1 / G18's concerns are bounded by an external
+constraint that the team has already named. That's a different texture
+than "this is just heuristic mush" — it's "we're working within the API
+we have."
+
+**`multiloop_start` is one commit old.** `151493b` added it; before that,
+all loops were started through the inline `/multiloop <goal>` parser in
+the command handler. Section 1 / B's complaints about the inline parser
+(`extractQuotedOption` only handles backticks/double quotes; default lane
+= mode name) are now legacy paths — the canonical path is the guide flow
+calling `multiloop_start` with structured params. The inline form is
+still reachable, so the foot-guns are real, but they sit on the
+deprecation slope, not the active surface.
+
+**Status-enum drift (Section 1 / H19) is in `docs/TODO.md` already.** The
+team has acknowledged it; I'm restating it. Worth keeping in feedback as a
+user-facing concern, but not a discovery.
+
+### Things that look worse with history visible
+
+**The version/CHANGELOG drift was a deliberate choice, not an oversight.**
+`ad56481 chore: bump version to v0.2.0` landed on 2026-05-07 02:18 JST.
+`d8e46fb`, `2721e0b`, and `151493b` (the three big v0.2 features) all
+landed *the same day*, between 20:57 and 22:11 JST — i.e. ~18 hours after
+the version bump. Either the bump was premature, or these features were
+expected before publish but slipped after. CHANGELOG `## Unreleased`
+preserves the intent, but `package.json` is "0.2.0", `pi install
+npm:pi-multiloop` will give 0.2.0 without these features, and
+README/skill copy describes them as live. A `0.2.1` (or `0.3.0`) cut
+should happen before the README is accurate.
+
+**The `lane` vs `lane/run-tag` argument inconsistency (Section 1 / B5)
+was introduced by the consolidation.** `1143e7e refactor: consolidate all
+commands under /multiloop subcommands` flattened separately-shaped
+commands (`/multiloop-status`, `/multiloop-archive`) into one parser. The
+parser preserved each command's old arg shape rather than picking one. So
+the inconsistency isn't ambient — it's specifically the residue of the
+consolidation, and a single `parseLaneTarget(arg, { allowLaneOnly:
+true })` helper would let `pause` / `stop` / `resume` / `archive` / `rm`
+all converge.
+
+**The `multiloop_decide` strict-equality guard (Section 1 / F15) was
+added with the compound-verifier feature.** `2721e0b` added both the
+`activeIteration.recommendedAction` machinery and the `sameMeasurements`
+check. The intent is "you can't decide differently than what your
+verification said," which is correct, but it landed without a documented
+recovery flow. The error message tells the agent to re-measure, but the
+README does not, and `skill.md` doesn't either. This is a fresh
+documentation gap.
+
+### The one big shift from Section 1
+
+If I had to pick a single revision: **Section 1 underweighted the
+"correctness ratchet" arc.** The notable trend across the iteration
+history is each fix tightening *what counts as a real loop step*:
+
+- registry-only loops can be stopped/paused (`cd128cd`),
+- formatDelta no longer divides by zero (`d857c1d`),
+- `archived` is a real status (`3dceac7`),
+- `multiloop_decide` won't accept stale or unrecorded measurements
+  (`2721e0b`),
+- omitted-but-configured guards are now synthetic-failed checks
+  (`2721e0b`),
+- the loop won't stop after one decide (`d8e46fb`),
+- session-start no longer silently attaches detached loops (`426da38`).
+
+That is a clean ratchet pattern and it's the most distinctive thing
+about the project. Section 1 read like "here are the rough edges"
+without naming the strategy that produced them. The rough edges are
+tradeoffs the ratchet pays for: stricter contracts → more friction
+when an agent goes off-script → more documentation needed at exactly the
+seams (mismatch errors, synthetic-failed checks, auto-continue policy)
+where the ratchet is locking. The single highest-leverage doc fix is to
+add a "When the loop tells you no" section that names every place the
+engine refuses an action, why, and what to do — that's the surface
+where the ratchet meets the user.
