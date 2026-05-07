@@ -178,6 +178,7 @@ describe("applyDecision", () => {
     expect(result.currentMetric).toBe(85);
     expect(result.bestMetric).toBe(85);
     expect(result.consecutiveFailures).toBe(0);
+    expect(result.activeIteration).toBeUndefined();
 
     const saved = loadState(cwd, id);
     expect(saved).not.toBeNull();
@@ -290,6 +291,28 @@ describe("shouldReanchor", () => {
 });
 
 describe("buildIterationContext", () => {
+  it("includes pending active iteration information", () => {
+    const state = makeState({
+      activeIteration: {
+        iteration: 2,
+        phase: "measured",
+        startedAt: "2026-05-07T00:00:00.000Z",
+        hypothesis: "try fewer open checklist items",
+        measurements: [356],
+        metric: 356,
+        recommendedAction: "revert",
+        measuredAt: "2026-05-07T00:01:00.000Z",
+      },
+    });
+
+    const context = buildIterationContext(state);
+
+    expect(context).toContain("Active iteration: 2 (measured)");
+    expect(context).toContain("Active hypothesis: try fewer open checklist items");
+    expect(context).toContain("Pending measurements: [356]");
+    expect(context).toContain("Pending decision: revert");
+  });
+
   it("includes lane, mode, iteration, status", () => {
     const state = makeState();
     const ctx = buildIterationContext(state);

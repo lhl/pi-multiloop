@@ -149,6 +149,7 @@ export function applyDecision(
   appendResult(cwd, id, result);
 
   state.iteration++;
+  delete state.activeIteration;
 
   if (decision.action === "keep") {
     state.currentMetric = measurement.median;
@@ -211,6 +212,19 @@ export function buildIterationContext(state: LoopState): string {
   }
   if (state.scope) {
     lines.push(`Scope: ${state.scope}`);
+  }
+
+  if (state.activeIteration) {
+    lines.push(`Active iteration: ${state.activeIteration.iteration} (${state.activeIteration.phase})`);
+    if (state.activeIteration.hypothesis) {
+      lines.push(`Active hypothesis: ${state.activeIteration.hypothesis}`);
+    }
+    if (state.activeIteration.phase === "measured") {
+      lines.push(`Pending measurements: [${state.activeIteration.measurements?.join(", ") ?? ""}]`);
+      if (state.activeIteration.recommendedAction) {
+        lines.push(`Pending decision: ${state.activeIteration.recommendedAction}`);
+      }
+    }
   }
 
   if (state.consecutiveFailures > 0) {

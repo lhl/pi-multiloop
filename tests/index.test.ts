@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsNotice, colorizeResumableLoopsNotice, decideCompactionResumeTiming } from "../extensions/pi-multiloop/index.js";
+import { buildAutoContinuePrompt, buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsNotice, colorizeResumableLoopsNotice, decideCompactionResumeTiming } from "../extensions/pi-multiloop/index.js";
 import { createInitialState } from "../extensions/pi-multiloop/state.js";
 
 function activeState() {
@@ -125,6 +125,41 @@ describe("buildExplicitResumePrompt", () => {
     expect(prompt).toContain("Goal: improve inference latency");
     expect(prompt).toContain("Verify: `./bench.py --quick`");
     expect(prompt).toContain("Do not start a new loop");
+  });
+});
+
+describe("buildAutoContinuePrompt", () => {
+  it("demands baseline measurement when no baseline is recorded", () => {
+    const state = activeState();
+    state.baseline = null;
+    state.currentMetric = null;
+    state.bestMetric = null;
+
+    const prompt = buildAutoContinuePrompt([state]);
+
+    expect(prompt).toContain("Continue active pi-multiloop work.");
+    expect(prompt).toContain("Do not answer with a status report");
+    expect(prompt).toContain("baseline is not recorded");
+    expect(prompt).toContain("multiloop_measure");
+  });
+
+  it("demands a decision for a measured active iteration", () => {
+    const state = activeState();
+    state.activeIteration = {
+      iteration: 4,
+      phase: "measured",
+      startedAt: "2026-05-07T00:00:00.000Z",
+      measurements: [356],
+      metric: 356,
+      recommendedAction: "revert",
+      measuredAt: "2026-05-07T00:01:00.000Z",
+    };
+
+    const prompt = buildAutoContinuePrompt([state]);
+
+    expect(prompt).toContain("iteration 4 has measurements [356]");
+    expect(prompt).toContain("multiloop_decide action=\"revert\"");
+    expect(prompt).toContain("before any status/final answer");
   });
 });
 

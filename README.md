@@ -17,6 +17,7 @@ Other loop extensions only support one loop per session or worktree. If you're t
 - **Flexible goals** — verify with any script or command you want
 - **Confidence scoring** — supports Median Absolute Deviation (MAD) to handle noisy benchmarks like GPU timing or training loss
 - **Durable history** — append-only JSONL per lane, survives context resets and restarts
+- **Mechanical continuation** — loop-owned turns automatically queue the next required action while the loop remains running, so agents do not stop after a single decide/log status report
 - **Compaction-aware resume** — when pi auto-compacts during a loop explicitly started or resumed in the current session, pi-multiloop injects a loop-aware resume prompt after the interrupted turn ends
 - **Escalation** — refines strategy automatically after consecutive failures
 - **TUI dashboard** — live status and metric history per lane
@@ -94,18 +95,19 @@ your-repo/
 | File | Written when | Contents |
 |---|---|---|
 | `registry.json` | Loop start/stop/archive | Index of all loops (lane, run-tag, mode, status, verify command). One file per repo. |
-| `state.json` | Every iteration + start/stop | Resume snapshot: iteration count, baseline, current/best metric, consecutive failures, pivot count, config. Overwritten each iteration. |
+| `state.json` | Every iteration + start/stop | Resume snapshot: iteration count, baseline, current/best metric, consecutive failures, pivot count, config, and any active measured-but-not-decided iteration. Overwritten each iteration. |
 | `results.jsonl` | Every iteration | Append-only log — one JSON line per iteration with: action (keep/revert/log), metric, baseline, delta, confidence, hypothesis, changes, measurements array. Never overwritten. |
 | `lessons.md` | On pivot escalation | Freeform notes appended when the loop pivots strategy. Carried forward to bias future hypotheses. |
 
 ### Lifecycle
 
 1. **`/multiloop`** — Creates `.multiloop/` (if absent) with `registry.json` and `active/<lane>/<run-tag>/state.json`.
-2. **Each iteration** — Appends to `results.jsonl`, overwrites `state.json`.
+2. **Each iteration** — `multiloop_iterate` records an active iteration marker in `state.json`; `multiloop_measure` records pending measurements; `multiloop_decide`/`multiloop_log` appends to `results.jsonl`, clears the active marker, and overwrites `state.json`.
 3. **`/multiloop stop`** — Updates status in both `state.json` and registry. Files stay on disk.
 4. **`/multiloop resume`** — Explicitly reconstructs in-memory state from `results.jsonl` + `state.json` and sends a loop-aware resume prompt. No new files until next iteration.
-5. **Auto-compaction during a current-session loop** — Sends a resume prompt grounded in active `.multiloop/` state after compaction, including the common Pi threshold path where compaction happens immediately after `agent_end`. Manual idle `/compact` does not restart the agent.
-6. **`/multiloop archive`** — Moves the run directory from `active/` to `archive/` with a timestamp prefix.
+5. **Auto-continuation during a current-session loop** — After a loop-owned turn ends, if the loop is still `running` and no user message is pending, pi-multiloop sends a follow-up prompt for the next required action. If a measurement is pending, the prompt forces decide/log before new work.
+6. **Auto-compaction during a current-session loop** — Sends a resume prompt grounded in active `.multiloop/` state after compaction, including the common Pi threshold path where compaction happens immediately after `agent_end`. Manual idle `/compact` does not restart the agent.
+7. **`/multiloop archive`** — Moves the run directory from `active/` to `archive/` with a timestamp prefix.
 
 pi-multiloop does **not** auto-attach persisted active loops when a new Pi session starts. Registry entries remain available on disk, and startup prints a passive "available to resume" notice into the chat history when resumable loops exist, but a loop becomes active in memory only after `/multiloop` starts it or `/multiloop resume <lane/run-tag>` resumes it in the current session.
 

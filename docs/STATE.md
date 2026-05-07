@@ -6,14 +6,14 @@ pi-multiloop currently has enough state to know whether a loop is attached to th
 
 The important missing pieces are:
 
-- **No explicit loop-turn state.** We do not record that a specific agent turn was caused by `/multiloop`, `/multiloop resume`, a compaction resume prompt, or loop tooling. We only know global Pi `agent_start` / `agent_end`.
-- **No persisted iteration-in-progress marker.** `multiloop_iterate` announces an iteration but does not mutate state. The durable iteration count advances only when `multiloop_decide` or `multiloop_log` records a result.
+- **Loop-turn state is runtime-only.** We record in memory when a turn was caused by `/multiloop`, `/multiloop resume`, a compaction/auto-continue prompt, or loop tooling. This is sufficient for current-session continuation, but it is not durable across process restarts.
+- **Persisted active-iteration markers now exist.** `multiloop_iterate` writes `activeIteration.phase = "started"`, `multiloop_measure` writes `activeIteration.phase = "measured"`, and `multiloop_decide`/`multiloop_log` clear it after appending `results.jsonl`.
 - **No reliable manual-vs-auto compaction reason in extension events.** Pi's session stream has compaction reasons internally (`manual`, `threshold`, `overflow`), but current `session_before_compact` / `session_compact` extension events do not expose that reason.
 - **No uniform record of built-in slash-command input.** Extension `input` events are emitted through `AgentSession.prompt()`. Built-in interactive commands such as `/compact` are handled before that path, so a last-user-submission heuristic cannot reliably see bare `/compact` unless Pi exposes it or changes command/input ordering.
 
-The main effect is around **manual compaction**. A manual idle `/compact` means the user is active and should usually not auto-restart a loop. However, from the extension event payload alone, a bare manual `/compact` can look like threshold auto-compaction. A custom manual `/compact <instructions>` is partly detectable because `customInstructions` is present in `session_before_compact`, but bare `/compact` is not.
+The main remaining effect is around **manual compaction**. A manual idle `/compact` means the user is active and should usually not auto-restart a loop. However, from the extension event payload alone, a bare manual `/compact` can look like threshold auto-compaction. A custom manual `/compact <instructions>` is partly detectable because `customInstructions` is present in `session_before_compact`, but bare `/compact` is not.
 
-This is otherwise a manageable corner case. The larger product behavior can be defined by clear attachment/running semantics: if a loop is attached and marked running, pi-multiloop may help resume it after context loss, but it should avoid surprising the user when the user is explicitly controlling compaction or submitting unrelated prompts.
+This is otherwise a manageable corner case. The larger product behavior is now defined by clear attachment/running plus loop-turn ownership semantics: if a loop is attached, marked running, and the just-ended turn was loop-owned, pi-multiloop queues a follow-up for the next required action. Normal user input while idle clears loop-turn ownership, so unrelated prompts do not restart the loop.
 
 ## State layers
 
@@ -54,6 +54,7 @@ The snapshot also records iteration metrics:
 - `consecutiveFailures`: count used for escalation.
 - `pivotCount`: number of pivots used.
 - `verifyCommand` / `guardCommand`: commands the loop should run.
+- `activeIteration`: optional marker for the next iteration when it has started or has measured-but-not-decided results.
 
 ### Append-only result state
 
@@ -66,7 +67,7 @@ Each line records a completed iteration result:
 - `log`
 - `skip`
 
-This is the authoritative history for reconstructing iteration count and failure streaks. It does not record that an iteration was started but interrupted before measurement/decision.
+This is the authoritative history for reconstructing iteration count and failure streaks. It does not record started-but-unfinished work; that lives in the snapshot's optional `activeIteration` marker until a result is appended.
 
 ### Runtime attachment state
 
@@ -193,12 +194,11 @@ Current behavior:
 
 - Finds an attached loop by lane.
 - Optionally reanchors state every 10 completed iterations.
+- Writes `activeIteration.phase = "started"` to `state.json`.
 - Returns context telling the assistant to run verify/guard.
-- Does **not** mutate `state.json`.
 - Does **not** append to `results.jsonl`.
-- Does **not** mark an iteration as in progress.
 
-Implication: if compaction or interruption happens after `multiloop_iterate` but before measurement/decision, the durable state only shows the previous completed iteration.
+Implication: if compaction or interruption happens after `multiloop_iterate` but before measurement/decision, resume prompts know which iteration is in progress.
 
 ### `multiloop_measure`
 
@@ -206,6 +206,7 @@ Current behavior:
 
 - If no baseline exists, establishes baseline/current/best metric and saves `state.json`.
 - Otherwise, reports whether the measurement improved relative to current baseline.
+- Writes `activeIteration.phase = "measured"`, the measurements, metric, and recommended keep/revert action to `state.json`.
 - Does not append a result or increment iteration.
 
 ### `multiloop_decide`
@@ -214,9 +215,10 @@ Current behavior:
 
 - Assesses confidence.
 - Applies `keep`, `revert`, `log`, or `skip`.
+- Requires the provided measurements to match the recorded measured active iteration.
 - Appends one result to `results.jsonl`.
 - Increments `state.iteration`.
-- Saves `state.json`.
+- Clears `activeIteration` and saves `state.json`.
 - May trigger escalation, pivot, or stop.
 
 ### `multiloop_log`
@@ -225,7 +227,7 @@ Current behavior:
 
 - Appends a `log` result to `results.jsonl`.
 - Increments `state.iteration`.
-- Saves `state.json`.
+- Clears `activeIteration` and saves `state.json`.
 
 ## Session startup lifecycle
 
@@ -266,12 +268,13 @@ Current code uses these pieces of state:
 - `pendingCompactionResumeTiming`
 - `lastActiveAgentEndAt`
 - `lastInputAt`
+- `loopTurnActive` / `loopTurnReason`
 - a 5 second recent window
 
 The intent is:
 
-- if compaction happens during an active agent turn, resume after `agent_end`;
-- if Pi threshold-compacts immediately after an active loop turn, resume after `session_compact`;
+- if compaction happens during a loop-owned active agent turn, resume after `agent_end`;
+- if Pi threshold-compacts immediately after a loop-owned turn, resume after `session_compact`;
 - if compaction is pre-prompt, skip because the submitted prompt will continue normally;
 - if manual idle `/compact`, skip.
 
@@ -281,7 +284,7 @@ The weak part is the time-based classification. A bare manual `/compact` soon af
 
 Mechanically, no.
 
-If a loop is attached in `activeStates` and `state.status === "running"`, current code treats it as running even while Pi is idle and the user is typing.
+If a loop is attached in `activeStates` and `state.status === "running"`, current code treats it as resumable/eligible. Automatic continuation additionally requires a loop-owned turn; normal user input while idle clears loop-turn ownership.
 
 Semantically, unknown.
 
@@ -309,9 +312,9 @@ A clearer internal model would distinguish:
 | user-controlled | User submitted ordinary input while no loop-owned turn was active. |
 | compacting-loop-turn | Compaction interrupted or followed a loop-owned turn. |
 
-The most useful missing flag is `loopTurnActive`.
+The implemented ownership flag is `loopTurnActive`.
 
-Possible ways to set it:
+Ways to set it:
 
 - when `/multiloop <goal>` sends the initial steer prompt;
 - when `/multiloop resume` sends its explicit resume prompt;
@@ -319,9 +322,9 @@ Possible ways to set it:
 - when a loop tool is called during a turn;
 - optionally when a normal user prompt explicitly names an attached loop, if we add classification later.
 
-Possible ways to clear it:
+Ways to clear it:
 
-- after `agent_end` if no compaction is pending;
+- after `agent_end` after optionally queueing auto-continuation;
 - when a normal user input arrives while idle;
 - when the loop is paused/stopped/archived/deleted;
 - after a compaction resume prompt is sent or intentionally skipped.

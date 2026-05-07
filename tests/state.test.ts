@@ -91,6 +91,63 @@ describe("state snapshot", () => {
 });
 
 describe("state reconstruction", () => {
+  it("preserves a pending active iteration beyond the last completed result", () => {
+    const state = createInitialState(id, "optimize", "echo 42");
+    state.iteration = 1;
+    state.baseline = 100;
+    state.currentMetric = 90;
+    state.activeIteration = {
+      iteration: 2,
+      phase: "measured",
+      startedAt: "2026-05-07T00:00:00.000Z",
+      measurements: [95],
+      metric: 95,
+      recommendedAction: "revert",
+      measuredAt: "2026-05-07T00:01:00.000Z",
+    };
+    saveState(cwd, id, state);
+    appendResult(cwd, id, {
+      iteration: 1,
+      timestamp: new Date().toISOString(),
+      action: "keep",
+      metric: 90,
+    });
+
+    const reconstructed = reconstructState(cwd, id);
+
+    expect(reconstructed!.iteration).toBe(1);
+    expect(reconstructed!.activeIteration?.iteration).toBe(2);
+    expect(reconstructed!.activeIteration?.phase).toBe("measured");
+  });
+
+  it("clears stale active iteration markers already covered by results", () => {
+    const state = createInitialState(id, "optimize", "echo 42");
+    state.iteration = 1;
+    state.baseline = 100;
+    state.currentMetric = 90;
+    state.activeIteration = {
+      iteration: 2,
+      phase: "measured",
+      startedAt: "2026-05-07T00:00:00.000Z",
+      measurements: [95],
+      metric: 95,
+      recommendedAction: "revert",
+      measuredAt: "2026-05-07T00:01:00.000Z",
+    };
+    saveState(cwd, id, state);
+    appendResult(cwd, id, {
+      iteration: 2,
+      timestamp: new Date().toISOString(),
+      action: "revert",
+      metric: 95,
+    });
+
+    const reconstructed = reconstructState(cwd, id);
+
+    expect(reconstructed!.iteration).toBe(2);
+    expect(reconstructed!.activeIteration).toBeUndefined();
+  });
+
   it("reconstructs state from results", () => {
     const state = createInitialState(id, "optimize", "echo 42", {
       metricDirection: "lower",

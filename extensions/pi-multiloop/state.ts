@@ -16,6 +16,18 @@ export interface IterationResult {
   measurements?: number[];
 }
 
+export interface ActiveIteration {
+  iteration: number;
+  phase: "started" | "measured";
+  startedAt: string;
+  hypothesis?: string;
+  changes?: string;
+  measurements?: number[];
+  metric?: number;
+  recommendedAction?: "keep" | "revert" | "log";
+  measuredAt?: string;
+}
+
 export interface LoopState {
   lane: string;
   runTag: string;
@@ -33,6 +45,7 @@ export interface LoopState {
   metricDirection: "lower" | "higher";
   scope?: string;
   goal?: string;
+  activeIteration?: ActiveIteration;
   startedAt: string;
   lastUpdated: string;
   config: Record<string, unknown>;
@@ -98,12 +111,20 @@ export function reconstructState(cwd: string, id: LaneId): LoopState | null {
   if (!state) return null;
 
   const results = readResults(cwd, id);
-  if (results.length === 0) return state;
+  if (results.length === 0) {
+    if (state.activeIteration && state.activeIteration.iteration <= state.iteration) {
+      delete state.activeIteration;
+    }
+    return state;
+  }
 
   const last = results[results.length - 1];
   state.iteration = last.iteration;
   if (last.metric !== undefined) {
     state.currentMetric = last.metric;
+  }
+  if (state.activeIteration && state.activeIteration.iteration <= state.iteration) {
+    delete state.activeIteration;
   }
 
   let consecutiveFailures = 0;

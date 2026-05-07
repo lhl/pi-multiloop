@@ -47,6 +47,8 @@ let lastCompactionEntryId: string | undefined;
 let pendingCompactionResumeTiming: CompactionResumeTiming | undefined;
 let lastActiveAgentEndAt = 0;
 let lastInputAt = 0;
+let loopTurnActive = false;
+let loopTurnReason: string | undefined;
 
 function stateKey(id: LaneId): string {
   return `${id.lane}/${id.runTag}`;
@@ -58,6 +60,32 @@ function textResult(text: string) {
 
 function runningStates(): LoopState[] {
   return Array.from(activeStates.values()).filter((state) => state.status === "running");
+}
+
+function markLoopTurn(reason: string): void {
+  loopTurnActive = true;
+  loopTurnReason = reason;
+}
+
+function sameMeasurements(a: number[] | undefined, b: number[]): boolean {
+  return Array.isArray(a) && a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function activeIterationSummary(state: LoopState): string {
+  if (state.baseline === null) {
+    return `- ${state.lane}/${state.runTag}: baseline is not recorded. Run verify \`${state.verifyCommand}\`, then call multiloop_measure to persist the baseline.`;
+  }
+
+  const active = state.activeIteration;
+  if (!active) {
+    return `- ${state.lane}/${state.runTag}: no iteration is in progress. Call multiloop_iterate, make one focused change, run verify${state.guardCommand ? " and guard" : ""}, then call multiloop_measure.`;
+  }
+
+  if (active.phase === "started") {
+    return `- ${state.lane}/${state.runTag}: iteration ${active.iteration} is started but not measured. Run verify \`${state.verifyCommand}\`${state.guardCommand ? ` and guard \`${state.guardCommand}\`` : ""}, then call multiloop_measure.`;
+  }
+
+  return `- ${state.lane}/${state.runTag}: iteration ${active.iteration} has measurements [${active.measurements?.join(", ") ?? ""}] and must be completed with multiloop_decide action="${active.recommendedAction ?? "log"}" before any status/final answer.`;
 }
 
 export type CompactionResumeTiming = "skip" | "after-current-agent-end" | "after-compaction";
@@ -111,9 +139,31 @@ function queueCompactionResume(
     if (latestStates.length === 0) return;
     if (ctx.hasPendingMessages()) return;
     try {
+      markLoopTurn("compaction-resume");
       pi.sendUserMessage(buildCompactionResumePrompt(latestStates, compactionEntryId), { deliverAs: "followUp" });
     } catch (err) {
       ctx.ui.notify(`multiloop resume after compact failed: ${(err as Error).message}`, "error");
+    }
+  }, 0);
+}
+
+function queueLoopAutoContinue(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  reason: string
+): void {
+  const states = runningStates();
+  if (states.length === 0 || ctx.hasPendingMessages()) return;
+
+  setTimeout(() => {
+    const latestStates = runningStates();
+    if (latestStates.length === 0) return;
+    if (ctx.hasPendingMessages()) return;
+    try {
+      markLoopTurn(`auto-continue:${reason}`);
+      pi.sendUserMessage(buildAutoContinuePrompt(latestStates), { deliverAs: "followUp" });
+    } catch (err) {
+      ctx.ui.notify(`multiloop auto-continue failed: ${(err as Error).message}`, "error");
     }
   }, 0);
 }
@@ -129,13 +179,18 @@ function buildLoopResumePrompt(
     compactionEntryId ? `Compaction entry: ${compactionEntryId}` : undefined,
     "",
     "Do not start a new loop and do not ask for confirmation. Resume from the persisted .multiloop state exactly where the loop left off.",
+    "This is an action contract, not a status request: do not provide a final/status answer while any listed loop remains running.",
+    "A verification is recorded only after multiloop_measure persists it; an iteration is complete only after multiloop_decide or multiloop_log updates state/results.",
     "",
     contexts,
     "",
     "Next:",
+    "- If baseline is missing, run the verify command and call multiloop_measure to persist it.",
+    "- If an active iteration is measured, call multiloop_decide or multiloop_log with the recorded measurements before doing anything else.",
     "- If an iteration was not in progress, call multiloop_iterate for the appropriate lane.",
     "- Run the loop's verify command and guard command if present.",
     "- Record results with multiloop_measure, then finish with multiloop_decide or multiloop_log.",
+    "- If the loop is still running after decide/log, continue into the next iteration instead of summarizing.",
     "- If state is ambiguous, inspect .multiloop/active/<lane>/<runTag>/state.json and results.jsonl before proceeding.",
   ].filter((line): line is string => line !== undefined).join("\n");
 }
@@ -153,6 +208,25 @@ export function buildCompactionResumePrompt(
     states,
     compactionEntryId
   );
+}
+
+export function buildAutoContinuePrompt(states: LoopState[]): string {
+  const contexts = states.map((state) => buildIterationContext(state)).join("\n\n");
+  const nextActions = states.map(activeIterationSummary).join("\n");
+  return [
+    "Continue active pi-multiloop work.",
+    "",
+    "Hard contract:",
+    "- Do not answer with a status report while any listed loop remains running.",
+    "- Complete the next mechanical loop action: verify/guard, multiloop_measure, then multiloop_decide or multiloop_log.",
+    "- A bash verify output alone is not recorded; persist measurements through multiloop_measure.",
+    "- After decide/log, continue into the next iteration unless the loop stops, is paused, or a true blocker prevents safe work.",
+    "",
+    contexts,
+    "",
+    "Required next action:",
+    nextActions,
+  ].join("\n");
 }
 
 function loopSummary(cwd: string, entry: RegistryEntry): string {
@@ -376,8 +450,12 @@ export default function (pi: ExtensionAPI) {
     announceResumableLoops(pi, ctx);
   });
 
-  pi.on("input", async () => {
+  pi.on("input", async (event) => {
     lastInputAt = Date.now();
+    if (event.source !== "extension") {
+      loopTurnActive = false;
+      loopTurnReason = undefined;
+    }
   });
 
   pi.on("agent_start", async () => {
@@ -386,7 +464,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_before_compact", async (_event, ctx) => {
     pendingCompactionResumeTiming = decideCompactionResumeTiming({
-      hasRunningStates: runningStates().length > 0,
+      hasRunningStates: runningStates().length > 0 && loopTurnActive,
       agentRunning,
       isIdle: ctx.isIdle(),
       now: Date.now(),
@@ -397,7 +475,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_compact", async (event, ctx) => {
     const timing = pendingCompactionResumeTiming ?? decideCompactionResumeTiming({
-      hasRunningStates: runningStates().length > 0,
+      hasRunningStates: runningStates().length > 0 && loopTurnActive,
       agentRunning,
       isIdle: ctx.isIdle(),
       now: Date.now(),
@@ -420,17 +498,29 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (_event, ctx) => {
-    if (runningStates().length > 0) {
+    const endedLoopTurn = loopTurnActive;
+    const endedLoopReason = loopTurnReason ?? "loop-turn";
+    if (runningStates().length > 0 && endedLoopTurn) {
       lastActiveAgentEndAt = Date.now();
     }
     agentRunning = false;
 
-    if (!resumeAfterCompact) return;
-    const compactionEntryId = lastCompactionEntryId;
-    resumeAfterCompact = false;
-    lastCompactionEntryId = undefined;
+    if (resumeAfterCompact) {
+      const compactionEntryId = lastCompactionEntryId;
+      resumeAfterCompact = false;
+      lastCompactionEntryId = undefined;
+      loopTurnActive = false;
+      loopTurnReason = undefined;
+      queueCompactionResume(pi, ctx, compactionEntryId);
+      return;
+    }
 
-    queueCompactionResume(pi, ctx, compactionEntryId);
+    loopTurnActive = false;
+    loopTurnReason = undefined;
+
+    if (endedLoopTurn) {
+      queueLoopAutoContinue(pi, ctx, endedLoopReason);
+    }
   });
 
   const IterateParams = Type.Object({
@@ -446,6 +536,7 @@ export default function (pi: ExtensionAPI) {
     description: "Signal the start of a new loop iteration. Call this before making changes.",
     parameters: IterateParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      markLoopTurn("multiloop_iterate");
       const id: LaneId = { lane: params.lane, runTag: params.runTag ?? "" };
 
       let state: LoopState | undefined;
@@ -469,9 +560,30 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
+      const nextIteration = state.iteration + 1;
+      if (state.activeIteration?.phase === "measured") {
+        return textResult(
+          [
+            `Iteration ${state.activeIteration.iteration} for ${formatLaneId(id)} is already measured.`,
+            `Measurements: [${state.activeIteration.measurements?.join(", ") ?? ""}]`,
+            `Call multiloop_decide with action="${state.activeIteration.recommendedAction ?? "log"}" before starting another iteration.`,
+          ].join("\n")
+        );
+      }
+
+      state.activeIteration = {
+        iteration: state.activeIteration?.iteration ?? nextIteration,
+        phase: "started",
+        startedAt: state.activeIteration?.startedAt ?? new Date().toISOString(),
+        hypothesis: params.hypothesis ?? state.activeIteration?.hypothesis,
+        changes: params.changes ?? state.activeIteration?.changes,
+      };
+      saveState(ctx.cwd, id, state);
+      activeStates.set(stateKey(id), state);
+
       return textResult(
         [
-          `Iteration ${state.iteration + 1} starting for ${formatLaneId(id)}.`,
+          `Iteration ${state.activeIteration.iteration} starting for ${formatLaneId(id)}.`,
           state.currentMetric !== null
             ? `Current ${state.metricName ?? "metric"}: ${state.currentMetric}`
             : `No baseline yet — this iteration will establish it.`,
@@ -499,6 +611,7 @@ export default function (pi: ExtensionAPI) {
       "Record measurements from running the verify command. Pass multiple measurements for statistical confidence.",
     parameters: MeasureParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      markLoopTurn("multiloop_measure");
       const id = findLane(params.lane);
       if (!id) {
         return textResult(`No active loop in lane "${params.lane}".`);
@@ -515,7 +628,9 @@ export default function (pi: ExtensionAPI) {
         state.baseline = confidence.median;
         state.currentMetric = confidence.median;
         state.bestMetric = confidence.median;
+        delete state.activeIteration;
         saveState(ctx.cwd, id, state);
+        activeStates.set(stateKey(id), state);
 
         return textResult(
           [
@@ -532,6 +647,22 @@ export default function (pi: ExtensionAPI) {
 
       const baseline = state.currentMetric ?? state.baseline;
       const improved = isImprovement(baseline, confidence.median, confidence.mad, state.metricDirection);
+      const recommendedAction = improved ? "keep" : "revert";
+      const activeIteration = state.activeIteration ?? {
+        iteration: state.iteration + 1,
+        phase: "started" as const,
+        startedAt: new Date().toISOString(),
+      };
+      state.activeIteration = {
+        ...activeIteration,
+        phase: "measured",
+        measurements: confidence.measurements,
+        metric: confidence.median,
+        recommendedAction,
+        measuredAt: new Date().toISOString(),
+      };
+      saveState(ctx.cwd, id, state);
+      activeStates.set(stateKey(id), state);
 
       return textResult(
         [
@@ -541,8 +672,9 @@ export default function (pi: ExtensionAPI) {
           `  Delta: ${formatDelta(baseline, confidence.median, state.metricDirection)}`,
           `  MAD: ${confidence.mad} | Confidence: ${confidenceLabel(confidence.confidence)}`,
           `  Improved: ${improved ? "YES" : "NO"}`,
+          `  Recorded pending iteration: ${state.activeIteration.iteration}`,
           "",
-          `Call multiloop_decide with action="${improved ? "keep" : "revert"}" to proceed.`,
+          `Call multiloop_decide with action="${recommendedAction}" to proceed.`,
         ].join("\n")
       );
     },
@@ -568,6 +700,7 @@ export default function (pi: ExtensionAPI) {
       "Record keep/revert decision for current iteration. Updates state and logs the result.",
     parameters: DecideParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      markLoopTurn("multiloop_decide");
       const id = findLane(params.lane);
       if (!id) {
         return textResult(`No active loop in lane "${params.lane}".`);
@@ -580,6 +713,26 @@ export default function (pi: ExtensionAPI) {
 
       if (state.currentMetric === null && state.baseline === null) {
         return textResult(`No baseline yet for lane "${params.lane}". Run multiloop_measure first.`);
+      }
+
+      if (state.activeIteration?.phase !== "measured") {
+        return textResult(
+          [
+            `No measured iteration is pending for ${formatLaneId(id)}.`,
+            "Run multiloop_iterate before changes, run the verify command, then call multiloop_measure before multiloop_decide.",
+          ].join("\n")
+        );
+      }
+
+      if (!sameMeasurements(state.activeIteration.measurements, params.measurements)) {
+        return textResult(
+          [
+            `Measurement mismatch for ${formatLaneId(id)} iteration ${state.activeIteration.iteration}.`,
+            `Recorded measurements: [${state.activeIteration.measurements?.join(", ") ?? ""}]`,
+            `Provided measurements: [${params.measurements.join(", ")}]`,
+            "Call multiloop_decide with the recorded measurements, or rerun verify and multiloop_measure to replace them.",
+          ].join("\n")
+        );
       }
 
       const confidence = assessConfidence(params.measurements);
@@ -608,8 +761,8 @@ export default function (pi: ExtensionAPI) {
         state,
         decision,
         confidence,
-        params.hypothesis,
-        params.changes
+        params.hypothesis ?? state.activeIteration.hypothesis,
+        params.changes ?? state.activeIteration.changes
       );
 
       activeStates.set(stateKey(id), state);
@@ -631,6 +784,9 @@ export default function (pi: ExtensionAPI) {
         lines.push("");
         lines.push("Loop has been stopped due to escalation exhaustion.");
         activeStates.delete(stateKey(id));
+      } else {
+        lines.push("");
+        lines.push("Loop is still running; pi-multiloop will continue to the next required action automatically.");
       }
 
       return textResult(lines.join("\n"));
@@ -649,6 +805,7 @@ export default function (pi: ExtensionAPI) {
     description: "Log an iteration result without keep/revert semantics. For research and dev modes.",
     parameters: LogParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      markLoopTurn("multiloop_log");
       const id = findLane(params.lane);
       if (!id) {
         return textResult(`No active loop in lane "${params.lane}".`);
@@ -668,14 +825,16 @@ export default function (pi: ExtensionAPI) {
       });
 
       state.iteration++;
+      delete state.activeIteration;
       if (params.metric !== undefined) {
         state.currentMetric = params.metric;
       }
       saveState(ctx.cwd, id, state);
       activeStates.set(stateKey(id), state);
+      updateStatus(ctx);
 
       return textResult(
-        `Logged iteration ${state.iteration} for ${formatLaneId(id)}.${params.metric !== undefined ? ` Metric: ${params.metric}` : ""}`
+        `Logged iteration ${state.iteration} for ${formatLaneId(id)}.${params.metric !== undefined ? ` Metric: ${params.metric}` : ""}\nLoop is still running; pi-multiloop will continue to the next required action automatically.`
       );
     },
   });
@@ -815,6 +974,7 @@ export default function (pi: ExtensionAPI) {
         updateLoopStatus(ctx.cwd, id, "active");
         updateStatus(ctx);
         ctx.ui.notify(`Resumed loop ${formatLaneId(id)} at iteration ${state.iteration}`, "info");
+        markLoopTurn("explicit-resume");
         pi.sendUserMessage(buildExplicitResumePrompt([state]), { deliverAs: "followUp" });
         return;
       }
@@ -1020,6 +1180,7 @@ export default function (pi: ExtensionAPI) {
       activeStates.set(stateKey(id), state);
       updateStatus(ctx);
 
+      markLoopTurn("start");
       pi.sendUserMessage(
         [
           `New ${mode} loop started: ${formatLaneId(id)}`,
@@ -1027,7 +1188,8 @@ export default function (pi: ExtensionAPI) {
           guardParts?.[1] ? `Guard: \`${guardParts[1]}\`` : null,
           `Goal: ${trimmed}`,
           "",
-          "Run the verify command to establish a baseline, then begin iterating.",
+          "Run the verify command to establish a baseline, call multiloop_measure to persist it, then keep iterating until the loop is stopped/paused or a true blocker occurs.",
+          "Do not answer with a status report while this loop remains running; complete verify → measure → decide/log in state/results and continue.",
         ]
           .filter((l): l is string => l !== null)
           .join("\n"),

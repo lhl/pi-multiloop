@@ -34,13 +34,24 @@ Analyze the user's goal to detect the appropriate mode:
 6. **Ask for scope** (optional): "Any specific files or directories to focus on?"
 7. **Confirm and start**: Summarize the configuration, then use the `/multiloop` command with the parsed config.
 
+## Runtime Hard Rules
+
+When a loop is active, treat every resume/start/auto-continue prompt as an action contract, not as a request for a status report.
+
+1. **Do not stop after one recorded decision.** If loop state remains `running`, continue into the next required action automatically unless the user pauses/stops it or a true blocker prevents safe work.
+2. **A verification is not recorded just because a shell command printed a metric.** It counts only after `multiloop_measure` persists the measurement in `.multiloop/active/<lane>/<runTag>/state.json`.
+3. **An iteration is not complete until `multiloop_decide` or `multiloop_log` appends `results.jsonl` and updates `state.json`.** Do not provide a final/status answer between measurement and decide/log.
+4. **On resume, inspect active iteration state.** If `state.json` has `activeIteration.phase == "measured"`, call `multiloop_decide`/`multiloop_log` with the recorded measurements before starting a new iteration.
+5. **Stop conditions:** user pause/stop, configured cap/goal reached if one exists, escalation exhaustion, or a true safety blocker. Do not ask "should I continue?" during an already-approved loop.
+
 ## During the Loop
 
 When a loop is active:
-1. **Each iteration**: Use `multiloop_iterate` before making changes, then `multiloop_measure` after running verify, then `multiloop_decide` to keep/revert.
-2. **Monitor escalation**: If the agent gets 3 consecutive failures, it should refine. At 5, pivot. At 2 pivots exhausted, stop.
-3. **Punchlist mode**: Read the checklist file, pick the next unchecked item, implement it, run guard, check it off.
-4. **Research mode**: Use `multiloop_log` instead of decide — record all results for later comparison.
+1. **Each iteration**: Use `multiloop_iterate` before making changes, run verify/guard, use `multiloop_measure`, then `multiloop_decide` to keep/revert or `multiloop_log` for log-only modes.
+2. **After decide/log**: If the tool reports the loop is still running, continue to the next iteration instead of summarizing.
+3. **Monitor escalation**: If the agent gets 3 consecutive failures, it should refine. At 5, pivot. At 2 pivots exhausted, stop.
+4. **Punchlist mode**: Read the checklist file, pick the next unchecked item, implement it, run guard, check it off.
+5. **Research mode**: Use `multiloop_log` instead of decide — record all results for later comparison.
 
 ## Steerability
 
