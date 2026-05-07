@@ -226,9 +226,42 @@ Current behavior:
 
 Current behavior:
 
-- Appends a `log` result to `results.jsonl`.
+- Appends a `log`, `skip`, `crash`, or `blocked` result to `results.jsonl`.
 - Increments `state.iteration`.
+- Updates snapshot action counters (`logs`, `crashes`, `blocked`, `lastAction`, `lastActionAt`).
 - Clears `activeIteration` and saves `state.json`.
+
+## Runtime refusal and recovery reference
+
+pi-multiloop intentionally refuses or redirects some actions rather than guessing. The recovery path should be explicit and state-grounded.
+
+| Refusal | Trigger | Reason | Recovery |
+| --- | --- | --- | --- |
+| No active loop | A loop tool targets a lane that is not attached in `activeStates`. | Tools should not silently resurrect stale registry entries or operate on the wrong lane. | Run `/multiloop` to inspect status, then `/multiloop resume <lane/run-tag>` or call `multiloop_resume` with an exact target. |
+| Missing baseline | `multiloop_decide` is called before any baseline/current metric exists. | Keep/revert decisions need a comparison point. | Run the configured verify command and call `multiloop_measure` to establish the baseline. |
+| Empty measurements | `multiloop_measure` or `multiloop_decide` receives no numeric measurements. | Empty arrays used to become metric `0`, which could corrupt baselines. | Rerun the verify command and pass at least one numeric measurement. |
+| Measurement mismatch | `multiloop_decide.measurements` differ from the last persisted `activeIteration.measurements`. | Prevents unrecorded, stale, or cherry-picked verification from deciding an iteration. | Call `multiloop_decide` with the recorded measurements, or rerun verify and `multiloop_measure` to replace them. |
+| Missing configured guard/prompt verifier | A loop has `guardCommand` or `promptVerifier`, but `multiloop_measure.checks` omits the matching command/prompt verdict. | Faster-but-incorrect output must not be kept by omission. | Run the configured guard/prompt verifier and pass its verdict in `checks`; otherwise decide with the failed recommendation. |
+| Measured-but-not-decided iteration | `multiloop_iterate` is called while `activeIteration.phase === "measured"`. | Starting new work would abandon a persisted measurement. | Finish the pending iteration with `multiloop_decide` or `multiloop_log` first. |
+| Decision mismatch | `multiloop_decide.action` conflicts with the recorded acceptance recommendation. | Keep/revert must follow the measured metric plus required checks. | Use the recommended action, or rerun verify and `multiloop_measure` if the recorded result is stale. |
+| Stopped/paused/detached loop | Commands/tools target a loop that is not eligible for the requested operation. | Avoid accidental operations on inactive or archived state. | Use `/multiloop` or `/multiloop ls --archived` to inspect, then resume/pause/stop/archive with an exact target if appropriate. |
+| Ambiguous lane-only target | A command/tool receives a lane that matches multiple eligible runs. | Lane-only operations are safe only when unambiguous. | Provide exact `lane/run-tag`; slash commands hand off a registry snapshot so the model can call the typed tool or ask you to choose. |
+| Escalation exhaustion | Consecutive failures exhaust the configured pivot budget. | The current autonomous search path is unlikely to recover without human review. | The loop stops; inspect `results.jsonl` and `lessons.md`, then start/resume a new strategy if desired. |
+
+## Guard execution policy
+
+`multiloop_measure` does **not** execute configured guard commands itself. The extension records metric/check verdicts supplied by the agent after the agent runs the repo's verify/guard commands. This preserves the north star that pi-multiloop wraps existing benchmark and test scripts; it does not become the benchmark runner, test runner, shell scheduler, or policy engine.
+
+If a guard or prompt verifier is configured and the agent omits the matching check verdict, pi-multiloop records a synthetic failed check. That makes omission safe without giving the extension responsibility for command execution.
+
+## Status vocabulary note
+
+The registry and snapshot intentionally use different status vocabularies:
+
+- Registry `active` means the loop is available/resumable on disk. It may be detached from the current Pi process.
+- Snapshot `running` means the loop is allowed to continue automatically once attached to `activeStates`.
+- Registry `completed` corresponds to snapshot `stopped` for user-stopped or escalation-stopped loops whose files remain under `.multiloop/active/...` until archived.
+- Registry/snapshot `archived` means the run directory was moved under `.multiloop/archive/...` and is not resumable without manual restoration.
 
 ## Session startup lifecycle
 
