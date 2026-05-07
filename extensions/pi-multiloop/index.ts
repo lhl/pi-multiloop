@@ -781,6 +781,7 @@ export default function (pi: ExtensionAPI) {
   const MeasureParams = Type.Object({
     lane: Type.String({ description: "Lane identifier" }),
     measurements: Type.Array(Type.Number(), {
+      minItems: 1,
       description: "Array of metric measurements (run verify multiple times for confidence)",
     }),
     checks: Type.Optional(Type.Array(VerificationCheckParams, {
@@ -804,6 +805,10 @@ export default function (pi: ExtensionAPI) {
       const state = activeStates.get(stateKey(id));
       if (!state) {
         return textResult(`No state for lane "${params.lane}".`);
+      }
+
+      if (params.measurements.length === 0) {
+        return textResult("At least one measurement is required. Run the verify command and pass its numeric result to multiloop_measure.");
       }
 
       const confidence = assessConfidence(params.measurements);
@@ -888,6 +893,7 @@ export default function (pi: ExtensionAPI) {
       { description: "Decision: keep changes, revert, log only, or skip" }
     ),
     measurements: Type.Array(Type.Number(), {
+      minItems: 1,
       description: "Metric measurements for this iteration",
     }),
     hypothesis: Type.Optional(Type.String()),
@@ -914,6 +920,10 @@ export default function (pi: ExtensionAPI) {
 
       if (state.currentMetric === null && state.baseline === null) {
         return textResult(`No baseline yet for lane "${params.lane}". Run multiloop_measure first.`);
+      }
+
+      if (params.measurements.length === 0) {
+        return textResult("At least one measurement is required. Use the measurements recorded by multiloop_measure.");
       }
 
       if (state.activeIteration?.phase !== "measured") {

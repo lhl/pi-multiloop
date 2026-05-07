@@ -51,9 +51,13 @@ export function medianAbsoluteDeviation(values: number[]): number {
 }
 
 export function assessConfidence(measurements: number[]): ConfidenceResult {
+  if (measurements.length === 0) {
+    throw new Error("At least one measurement is required");
+  }
+
   if (measurements.length < 2) {
     return {
-      median: measurements[0] ?? 0,
+      median: measurements[0],
       mad: 0,
       confidence: "low",
       measurements,

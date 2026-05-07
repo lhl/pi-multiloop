@@ -61,11 +61,35 @@ describe("compound verifier acceptance", () => {
       promptVerifier: "Review output semantics.",
     }, [
       { name: "tests", kind: "mechanical", command: "npm test", passed: true },
-      { name: "semantic review", kind: "prompt", passed: true },
+      { name: "semantic review", kind: "prompt", prompt: "Review output semantics.", passed: true },
     ]);
 
     expect(checks).toHaveLength(2);
     expect(checks.every((check) => check.passed)).toBe(true);
+  });
+
+  it("does not treat unrelated mechanical checks as the configured guard", () => {
+    const checks = ensureRequiredChecks({
+      guardCommand: "npm test",
+    }, [
+      { name: "lint", kind: "mechanical", command: "npm run lint", passed: true },
+    ]);
+
+    expect(checks).toHaveLength(2);
+    expect(checks[0]).toMatchObject({ name: "lint", passed: true });
+    expect(checks[1]).toMatchObject({ name: "guard", command: "npm test", passed: false });
+  });
+
+  it("requires the configured prompt verifier to be reported explicitly", () => {
+    const checks = ensureRequiredChecks({
+      promptVerifier: "Review output semantics.",
+    }, [
+      { name: "generic prompt review", kind: "prompt", passed: true },
+    ]);
+
+    expect(checks).toHaveLength(2);
+    expect(checks[0]).toMatchObject({ name: "generic prompt review", passed: true });
+    expect(checks[1]).toMatchObject({ name: "prompt verifier", prompt: "Review output semantics.", passed: false });
   });
 
   it("normalizes missing names and formats evidence", () => {

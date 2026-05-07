@@ -32,32 +32,32 @@ export function ensureRequiredChecks(
   checks: VerificationCheck[]
 ): VerificationCheck[] {
   const result = [...checks];
-  if (state.guardCommand) {
+  const guardCommand = state.guardCommand?.trim();
+  if (guardCommand) {
     const hasGuard = result.some((check) =>
-      check.command === state.guardCommand ||
-      check.kind === "guard" ||
-      (check.kind === "mechanical" && check.command !== undefined)
+      check.command?.trim() === guardCommand
     );
     if (!hasGuard) {
       result.push({
         name: "guard",
         kind: "guard",
-        command: state.guardCommand,
+        command: guardCommand,
         passed: false,
         evidence: "Configured guard was not reported to multiloop_measure.checks.",
       });
     }
   }
 
-  if (state.promptVerifier) {
+  const promptVerifier = state.promptVerifier?.trim();
+  if (promptVerifier) {
     const hasPromptVerifier = result.some((check) =>
-      check.prompt === state.promptVerifier || check.kind === "prompt"
+      check.prompt?.trim() === promptVerifier
     );
     if (!hasPromptVerifier) {
       result.push({
         name: "prompt verifier",
         kind: "prompt",
-        prompt: state.promptVerifier,
+        prompt: promptVerifier,
         passed: false,
         evidence: "Configured prompt verifier was not reported to multiloop_measure.checks.",
       });

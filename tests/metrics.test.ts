@@ -58,6 +58,10 @@ describe("medianAbsoluteDeviation", () => {
 });
 
 describe("assessConfidence", () => {
+  it("rejects empty measurements", () => {
+    expect(() => assessConfidence([])).toThrow("At least one measurement is required");
+  });
+
   it("returns low confidence for single measurement", () => {
     const result = assessConfidence([42]);
     expect(result.confidence).toBe("low");
