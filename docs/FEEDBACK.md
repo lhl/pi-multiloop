@@ -392,3 +392,232 @@ where the ratchet is locking. The single highest-leverage doc fix is to
 add a "When the loop tells you no" section that names every place the
 engine refuses an action, why, and what to do — that's the surface
 where the ratchet meets the user.
+
+## Section 3 — Reading codex-autoresearch For Adoption (2026-05-07)
+
+`~/codex-autoresearch/` is the upstream autoresearch skill for Codex CLI
+(forked by lhl from `leo-lilinxiao/codex-autoresearch`). Same problem
+domain as pi-multiloop, very different architecture: skill + Python helper
+scripts driving Codex through a TSV/JSON state contract, vs. extension +
+typed pi tools driving the agent through a tighter API. The README in
+pi-multiloop already cites it as a sibling project. Reading it side by side
+makes the design tradeoffs visible.
+
+The goal of this section is *not* "import its features." The two systems
+have already diverged on first principles (single worktree vs.
+multi-worktree, typed tools vs. helper scripts, JSONL vs. TSV) and many
+choices that look like missing features are deliberate north-star
+preservation. The goal is to flag the half-dozen places where adopting an
+idea is cheap, additive, and consistent with pi-multiloop's stated stance.
+
+### What codex-autoresearch does that pi-multiloop should consider
+
+These are roughly ranked by adoption ROI: cost vs. fit with pi-multiloop's
+north stars.
+
+1. **Atomic state writes (high ROI, ~10 lines).**
+   `references/session-resume-protocol.md` line 68: "Write protocol: write
+   to a uniquely named temporary file in the same directory, fsync, then
+   rename to `autoresearch-state.json` (atomic)." pi-multiloop's `saveState`
+   uses `writeFileSync` directly (`state.ts:114-118`). A crash mid-write
+   today produces a partial JSON file that fails `JSON.parse` on resume.
+   Atomic temp+rename costs one helper and would harden every state save.
+
+2. **Richer state counters (high ROI, easy schema bump).**
+   codex-autoresearch's JSON state breaks out `keeps`, `discards`,
+   `crashes`, `no_ops`, `blocked`, `consecutive_discards`, `pivot_count`,
+   `last_status` (`session-resume-protocol.md:46-54`). Pi-multiloop's
+   `LoopState` (`state.ts:46-69`) only carries `iteration`,
+   `consecutiveFailures`, and `pivotCount` — a `keep` and a `revert` in
+   the same iteration count are indistinguishable from the snapshot
+   without replaying `results.jsonl`. Adding `keeps`, `reverts`, `logs`,
+   `lastAction`, and `lastUpdatedAction` to the snapshot makes
+   `/multiloop status` and the dashboard much more informative for free.
+
+3. **Resume helper returns a typed decision (medium ROI, design
+   improvement).**
+   `autoresearch_resume_check.py` returns one of
+   `full_resume | mini_wizard | tsv_fallback | fresh_start`
+   (`session-resume-protocol.md:106-122`), and the resume prompt acts on
+   that decision. Pi-multiloop's `reconstructState`
+   (`state.ts:126-166`) silently best-efforts; mismatches between
+   `state.json` and `results.jsonl` get papered over (a stale
+   `activeIteration` is just dropped). Adopting "the resume helper
+   classifies the resume situation and the prompt acts on the
+   classification" would let pi-multiloop differentiate
+   "clean resume" from "JSON drift, ask the agent to reconcile" from
+   "no JSON, reconstruct from JSONL" — three meaningfully different
+   prompts today collapsed into one.
+
+4. **Structured lessons schema with capacity management (medium ROI,
+   directly fits pi-multiloop's stated cross-run-learning goal).**
+   `references/lessons-protocol.md` defines a per-entry schema
+   (Strategy / Outcome / Insight / Context / Iteration / Timestamp), a
+   50-entry archive target with family compaction, and time-decay
+   weighting (14d / 30d). Pi-multiloop's `appendLesson`
+   (`state.ts:168-178`) is a free-form one-liner: `- [timestamp]
+   message`. The README and PLAN list "Cross-run learning" as a feature,
+   but with no schema there is no way for the agent to pattern-match
+   prior insights during ideation. Adopting the schema (even without
+   compaction) would convert `lessons.md` from a journal into a queryable
+   bias source.
+
+5. **A `crash` / `no-op` / `blocked` / `drift` action vocabulary (medium
+   ROI, two-line schema change).**
+   `references/results-logging.md:84-96` enumerates ten status values
+   covering verification crashes, empty diffs, hard blockers, and
+   metric drift. Pi-multiloop has four (`keep | revert | log | skip`).
+   When `multiloop_measure` errors out today, the agent has to choose
+   between calling `multiloop_decide action="revert"` (which will be
+   rejected since no measured iteration is pending) and just abandoning
+   the iteration. A `crash` action would let the engine record what
+   actually happened without forcing a phantom revert.
+
+6. **Web-search escalation between pivot-exhausted and stop (medium ROI,
+   one new escalation level).**
+   `references/pivot-protocol.md:43-66` adds Level 3 (web search after 2
+   PIVOTs) and Level 4 (soft-blocker handoff after 3 PIVOTs). Pi-multiloop
+   stops at `MAX_PIVOTS = 2` and exits (`loop.ts:99-105`). Pi already
+   exposes WebFetch/WebSearch to the agent, so adding one more rung —
+   "after `MAX_PIVOTS`, prompt the agent to do a targeted web search once
+   before stopping" — is a free productivity gain at exactly the moment
+   the loop is otherwise giving up. Keep the current escalation table
+   (`docs/TODO.md` mentions structural success labels but not this).
+
+7. **Layered skill loading (medium ROI, doc reorg).**
+   `SKILL.md` lines 14-23 instruct the agent to load only the references
+   that match the current situation: load `runtime-hard-invariants.md`
+   only for active execution modes; load `session-resume-protocol.md`
+   only when resuming; load `interaction-wizard.md` only at launch. Pi-
+   multiloop's `skills/multiloop/skill.md` is one self-contained file. The
+   layered approach keeps context budget small for short tasks and
+   detailed for stuck-deep tasks. Pi-multiloop already has the underlying
+   docs (`LOOP_GUIDE.md`, `STATE.md`); the skill just doesn't tell the
+   agent when to load them.
+
+8. **The "two-phase boundary" name (low cost, high clarity).**
+   codex-autoresearch's wizard repeatedly cites "two-phase boundary: all
+   questions before launch, no questions after" (e.g.,
+   `interaction-wizard.md:11`, `loop-workflow.md:13`,
+   `pivot-protocol.md` integration). Pi-multiloop's docs imply the same
+   rule but without a name. Naming it makes "you've already crossed the
+   boundary, don't ask" something the agent can assert instead of
+   having to deduce. The skill's Runtime Hard Rule 6 is exactly the
+   right place to lift this name in.
+
+9. **Multiple-choice over open-ended clarifications (low cost, doc note).**
+   `interaction-wizard.md:51` makes MC the default question shape. Pi-
+   multiloop's `LOOP_GUIDE.md` says "Ask concrete questions with suggested
+   defaults rather than open-ended forms" — same intent, weaker push.
+   Tightening the language to "prefer A/B/C choices over free-form" gets
+   shorter setup turns.
+
+10. **Health-check preflight (low ROI for v0.2; worth a v0.3 stub).**
+    `references/health-check-protocol.md` runs disk-space / verify-exists
+    / git-state / log-integrity checks before each detached relaunch.
+    Pi-multiloop is foreground-only today, so the relaunch boundary
+    doesn't exist; but a "first-iteration preflight" that checks the
+    verify command resolves and the lane dir is writable would catch the
+    "verify command typo" failure mode without making the user wait for
+    a full iteration to discover it.
+
+### What pi-multiloop should NOT adopt
+
+These are codex-autoresearch features that look attractive but cut
+against pi-multiloop's stated north stars. Better to leave them alone:
+
+- **Background/detached runtime (`autoresearch_runtime_ctl.py launch`).**
+  Pi-multiloop's PLAN explicitly defers background mode to "v0.2"
+  (`docs/PLAN.md:52`) and currently scopes it as "in-process". The detached
+  runtime in codex-autoresearch is a major subsystem (manifest, supervisor,
+  hooks, exec policy). The pi extension event surface can already drive
+  long-running attended loops; a detached runtime competes with `pi`
+  itself rather than composing with it.
+
+- **Parallel experiments via worktrees.**
+  `references/parallel-experiments-protocol.md` runs up to 3 hypotheses in
+  parallel git worktrees with subagent workers. Pi-multiloop's whole
+  pitch is "lane isolation on the *same* worktree." Parallel-via-worktree
+  would re-introduce exactly the merge pain `docs/PLAN.md:7` cites as the
+  reason multi-loop exists. If parallelism becomes interesting later, it
+  should be parallel *lanes* on one worktree, not parallel worktrees.
+
+- **Multi-repo (primary + companion repos).**
+  `session-resume-protocol.md:74-76` and the launch manifest carry
+  `config.repos` with role tags. This belongs in a higher-level
+  orchestrator (pi-teams, pi-messenger). Pi-multiloop scopes itself to
+  one worktree by design.
+
+- **Helper-script architecture.**
+  codex-autoresearch's `autoresearch_record_iteration.py`,
+  `autoresearch_init_run.py`, `autoresearch_resume_check.py`, etc. exist
+  because Codex skills can't expose typed tools the way pi extensions can.
+  Pi-multiloop already has typed `multiloop_*` tools with parameter
+  schemas. The helper-script indirection would be a regression.
+
+- **TSV log format.**
+  `research-results.tsv` is fine for fixed columns, but pi-multiloop's
+  v0.2 verification checks (`checks: VerificationCheck[]` in
+  `state.ts:14-29`) would be ugly to flatten into TSV. JSONL is the
+  right choice for arbitrary nested check arrays.
+
+- **Structured `required_keep_labels` / `required_stop_labels`.**
+  These look powerful (`results-logging.md:58-79`), but pi-multiloop's
+  compound verifiers already cover the same use case via mechanical/prompt
+  checks. Adding labels alongside checks would be two ways to express the
+  same constraint.
+
+- **Internationalized README.**
+  Premature for a 5-day-old project with one named user.
+
+### Surprising things codex-autoresearch reads as right
+
+These are stylistic moves I noticed reading the docs side by side, not
+features:
+
+- **The same invariant is repeated in four places**
+  ("log every completed experiment before the next one starts" appears in
+  `runtime-hard-invariants.md`, `loop-workflow.md`,
+  `interaction-wizard.md`, and `SKILL.md` Hard Rule 14). This looks
+  redundant on first read; on second read it's the most-violated
+  invariant restated everywhere it could be ignored. Pi-multiloop has the
+  equivalent rule (decide/log between iterations) and states it once. The
+  pattern is worth copying for the *one* rule that gets violated most
+  often — Section 1 / G's auto-continue rule, probably.
+
+- **The wizard is allowed to refuse "go" if the summary isn't shown.**
+  `interaction-wizard.md:22-23`: "The mandatory confirmation round must
+  never collapse into a bare 'foreground/background + go' prompt." Pi-
+  multiloop's setup guide doesn't explicitly forbid the agent from
+  bypassing the summary if the user is impatient.
+
+- **Docstrings name the *call site*, not just the contract.**
+  e.g. `autoresearch_record_iteration.py` is not just "appends a row";
+  the docstring tells the agent *which workflow phase* should call it.
+  Pi-multiloop's `multiloop_iterate`/`measure`/`decide` descriptions
+  describe the operation but not the phase. Adding "Call this *between*
+  iterations, before any file edits" to `multiloop_iterate.description`
+  would make the order self-documenting in the tool list.
+
+### One concrete adoption package for pi-multiloop v0.2.x
+
+If I had to pick the smallest set that's clearly worth doing now, before
+the next npm publish:
+
+1. Atomic `saveState` (item 1).
+2. Schema-bump `LoopState` to add `keeps`, `reverts`, `logs`,
+   `lastAction` counters; surface them in `/multiloop status` and the
+   dashboard rows (item 2).
+3. Convert `appendLesson` to write the structured 6-field schema; leave
+   the file format as `lessons.md` markdown but standardize the entry
+   shape (item 4).
+4. Add `crash` and `blocked` to the action union; `multiloop_decide`
+   accepts them and `appendResult` records them (item 5).
+5. Lift "two-phase boundary" as a named term in skill / LOOP_GUIDE /
+   `buildSetupGuidePrompt` (item 8).
+6. Add a "phase hint" sentence to each `multiloop_*` tool description
+   so the order is discoverable from the tool list alone (last bullet).
+
+That's a single PR's worth of work, fully consistent with the existing
+north stars, and it directly addresses the "the engine refuses an
+action and the agent doesn't know why" surface flagged in Section 2.
