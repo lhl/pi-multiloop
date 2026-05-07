@@ -268,15 +268,16 @@ export function buildSetupGuidePrompt(goalSeed?: string): string {
     "Use the loop setup guide contract:",
     "1. Scan the repo before proposing a loop: inspect the directory structure and relevant manifests/scripts/configs. Do not edit files during setup.",
     "2. Ask at least one repo-grounded clarification round before launch, even if the request seems obvious. Prefer concrete defaults and multiple-choice questions.",
-    "3. Infer and confirm: goal, mode, lane, scope, metric name, metric direction, verify command, guard command, prompt verifier, acceptance policy, stop condition/iteration cap, and rollback safety.",
-    "4. For compound goals like performance improves while output remains correct, configure a metric verify command plus mechanical/prompt checks. Acceptance should be: metric improves and every check passes.",
-    "5. Present a short confirmation summary with concrete commands and current baseline plan. Do not start the loop until I explicitly reply go/start/launch.",
-    "6. After approval, call multiloop_start with the confirmed config. Do not ask another question after approval unless a true safety blocker appears.",
+    "3. Infer and confirm: goal, mode, lane, scope, metric name, metric direction, acceptance mode, verify command, guard command, prompt verifier, acceptance policy, stop condition/iteration cap, and rollback safety.",
+    "4. For punchlists, default to acceptanceMode=log with open_or_partial_items lower-is-better progress; use keep-revert only when the user confirms a metric optimization goal plus rollback safety.",
+    "5. For compound goals like performance improves while output remains correct, configure a metric verify command plus mechanical/prompt checks. Acceptance should be: metric improves and every check passes.",
+    "6. Present a short confirmation summary with concrete commands and current baseline plan. Do not start the loop until I explicitly reply go/start/launch.",
+    "7. After approval, call multiloop_start with the confirmed config. Do not ask another question after approval unless a true safety blocker appears.",
     "",
     "Confirmation format:",
     "**Proposed loop**",
     "- Target: ...",
-    "- Metric: ... (direction: lower/higher)",
+    "- Metric: ... (direction: lower/higher; acceptance mode: log/keep-revert)",
     "- Verify: `...`",
     "- Guard/checks: `...` plus prompt verifier if needed",
     "- Scope/lane: ...",
@@ -721,6 +722,7 @@ export default function (pi: ExtensionAPI) {
     acceptancePolicy?: string;
     metricName?: string;
     metricDirection?: "lower" | "higher";
+    acceptanceMode?: "log" | "keep-revert";
     scope?: string;
   }
 
@@ -736,6 +738,7 @@ export default function (pi: ExtensionAPI) {
       acceptancePolicy,
       metricName: config.metricName,
       metricDirection: config.metricDirection ?? MODES[config.mode].defaultDirection,
+      acceptanceMode: config.acceptanceMode ?? MODES[config.mode].defaultAcceptanceMode,
       scope: config.scope,
       goal: config.goal,
     });
@@ -771,6 +774,7 @@ export default function (pi: ExtensionAPI) {
       state.promptVerifier ? `Prompt verifier: ${state.promptVerifier}` : null,
       state.acceptancePolicy ? `Acceptance: ${state.acceptancePolicy}` : null,
       state.metricName ? `Metric: ${state.metricName} (${state.metricDirection})` : `Metric direction: ${state.metricDirection}`,
+      `Acceptance mode: ${state.acceptanceMode}`,
       state.scope ? `Scope: ${state.scope}` : null,
       `Goal: ${state.goal ?? ""}`,
       "",
@@ -795,6 +799,7 @@ export default function (pi: ExtensionAPI) {
     acceptancePolicy: Type.Optional(Type.String({ description: "Acceptance rule, e.g. metric improves and all checks pass" })),
     metricName: Type.Optional(Type.String({ description: "Metric name" })),
     metricDirection: Type.Optional(Type.Union([Type.Literal("lower"), Type.Literal("higher")], { description: "Whether lower or higher metric values are better" })),
+    acceptanceMode: Type.Optional(Type.Union([Type.Literal("log"), Type.Literal("keep-revert")], { description: "Acceptance behavior: log/progress or optimize-style keep/revert" })),
     scope: Type.Optional(Type.String({ description: "Files/directories in scope" })),
   });
 

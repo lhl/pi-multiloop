@@ -214,6 +214,7 @@ export function buildIterationContext(state: LoopState): string {
   lines.push(`## Active Loop: ${state.lane}/${state.runTag}`);
   lines.push(`Mode: ${state.mode} | Iteration: ${state.iteration} | Status: ${state.status}`);
   lines.push(`Actions: ${formatActionCounters(state)}`);
+  lines.push(`Acceptance mode: ${state.acceptanceMode ?? (state.mode === "optimize" ? "keep-revert" : "log")}`);
 
   if (state.goal) {
     lines.push(`Goal: ${state.goal}`);

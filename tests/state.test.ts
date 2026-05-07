@@ -325,6 +325,13 @@ describe("createInitialState", () => {
     expect(state.lastAction).toBeNull();
     expect(state.status).toBe("running");
     expect(state.metricDirection).toBe("lower");
+    expect(state.acceptanceMode).toBe("keep-revert");
+  });
+
+  it("defaults non-optimize modes to log acceptance", () => {
+    expect(createInitialState(id, "punchlist", "make test").acceptanceMode).toBe("log");
+    expect(createInitialState(id, "research", "make bench").acceptanceMode).toBe("log");
+    expect(createInitialState(id, "dev", "npm test").acceptanceMode).toBe("log");
   });
 
   it("accepts optional config", () => {

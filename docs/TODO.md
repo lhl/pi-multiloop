@@ -58,18 +58,18 @@ Keep tasks bite-sized and commit each logical unit separately.
 
 ### Punchlist semantics
 
-- [ ] Define punchlist states in code and docs:
+- [x] Define punchlist states in code and docs:
   - `[ ]` open / not started
   - `[x]` done
   - `[~]` partial, blocked, or intentionally not completable; must include a reason when possible
-- [ ] Extend punchlist parsing to preserve state (`open`, `done`, `partial`) and line numbers.
-- [ ] Add an explicit loop acceptance mode to state, e.g. `acceptanceMode: "log" | "keep-revert"`, instead of inferring from `metricDirection` defaults.
-- [ ] Default punchlist loops to log/progress acceptance, not optimize-style keep/revert.
-- [ ] Allow explicit keep/revert punchlist loops only when the setup guide confirms a metric optimization goal in addition to checklist progress.
-- [ ] Add a standard punchlist verifier helper that counts open/done/partial items and emits a mechanical metric.
-- [ ] Define the default pattern for generated or helper verification code: place run-owned helpers under `.multiloop/active/<lane>/<runTag>/` while keeping user-provided verify commands first-class and optional.
-- [ ] Document how generated helpers compose with Pi/plugin built-ins and when the agent should prefer existing repo scripts instead.
-- [ ] Add tests for punchlist parsing, partial markers, progress metrics, and punchlist acceptance-mode behavior.
+- [x] Extend punchlist parsing to preserve state (`open`, `done`, `partial`) and line numbers.
+- [x] Add an explicit loop acceptance mode to state, e.g. `acceptanceMode: "log" | "keep-revert"`, instead of inferring from `metricDirection` defaults.
+- [x] Default punchlist loops to log/progress acceptance, not optimize-style keep/revert.
+- [x] Allow explicit keep/revert punchlist loops only when the setup guide confirms a metric optimization goal in addition to checklist progress.
+- [x] Add a standard punchlist verifier helper that counts open/done/partial items and emits a mechanical metric.
+- [x] Define the default pattern for generated or helper verification code: place run-owned helpers under `.multiloop/active/<lane>/<runTag>/` while keeping user-provided verify commands first-class and optional.
+- [x] Document how generated helpers compose with Pi/plugin built-ins and when the agent should prefer existing repo scripts instead.
+- [x] Add tests for punchlist parsing, partial markers, progress metrics, and punchlist acceptance-mode behavior.
 
 ### Docs and guide unification
 

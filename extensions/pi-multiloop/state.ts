@@ -73,6 +73,7 @@ export interface LoopState {
   acceptancePolicy?: string;
   metricName?: string;
   metricDirection: "lower" | "higher";
+  acceptanceMode: "log" | "keep-revert";
   scope?: string;
   goal?: string;
   activeIteration?: ActiveIteration;
@@ -313,6 +314,7 @@ export function createInitialState(
     acceptancePolicy?: string;
     metricName?: string;
     metricDirection?: "lower" | "higher";
+    acceptanceMode?: "log" | "keep-revert";
     scope?: string;
     goal?: string;
     config?: Record<string, unknown>;
@@ -341,6 +343,7 @@ export function createInitialState(
     acceptancePolicy: options.acceptancePolicy,
     metricName: options.metricName,
     metricDirection: options.metricDirection ?? "lower",
+    acceptanceMode: options.acceptanceMode ?? (mode === "optimize" ? "keep-revert" : "log"),
     scope: options.scope,
     goal: options.goal,
     startedAt: new Date().toISOString(),

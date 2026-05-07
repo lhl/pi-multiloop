@@ -40,8 +40,23 @@ Use natural language with the user, but internally settle these fields:
 | Guard command | Optional pass/fail command for regressions. |
 | Prompt verifier | Optional LLM/human-readable criterion for correctness that commands cannot fully capture. |
 | Acceptance policy | Usually “metric improves and all checks pass” for keep/revert loops. |
+| Acceptance mode | `log` for punchlist/research/dev progress loops; `keep-revert` only for explicit metric optimization. |
 | Stop condition | Target, iteration cap, or “until interrupted”. |
 | Rollback safety | Whether normal revert is safe; never assume destructive reset is allowed. |
+
+## Punchlist Semantics
+
+Markdown punchlists use these states:
+
+- `[ ]` — open / not started.
+- `[x]` or `[X]` — done.
+- `[~]` — partial, blocked, or intentionally not completable; include a short reason in the item text when possible.
+
+Punchlist loops default to `acceptanceMode: "log"`: each iteration records progress and checks rather than optimize-style keep/revert. Use `acceptanceMode: "keep-revert"` for a punchlist only when the clarified goal includes a real metric optimization objective in addition to checklist progress, and the user confirms rollback safety.
+
+The standard punchlist progress metric is `open_or_partial_items` (lower is better), computed as open `[ ]` plus partial `[~]` items. Prefer an existing repo verify command if one exists. If the agent needs a small generated helper, place run-owned helper code under `.multiloop/active/<lane>/<runTag>/` and call it from the verify command; do not overwrite repo scripts just to count checklist items.
+
+Generated helpers compose with Pi/plugin built-ins as ordinary verify commands. Prefer existing repo scripts and tests first; generate a helper only when there is no first-class command for the metric.
 
 ## Compound Verifier Pattern
 

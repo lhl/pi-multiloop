@@ -77,7 +77,7 @@ Hypothesis, implement, measure, log results. All results are preserved for compa
 Pick a task, implement, test, commit. General development with iteration tracking.
 
 ### Punchlist
-Parse a markdown checklist, pick the next unchecked item, implement, verify, check it off. Done when all items pass.
+Parse a markdown checklist, pick the next open (`[ ]`) or partial (`[~]`) item, implement, verify, and check it off (`[x]`) or leave it partial with a reason. Punchlist loops default to log/progress acceptance using the `open_or_partial_items` metric; use keep/revert only for explicit metric optimization goals.
 
 ## Compound Verifiers
 

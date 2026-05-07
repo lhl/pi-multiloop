@@ -8,6 +8,7 @@ import {
   nextUncheckedItem,
   checkOffItem,
   punchlistProgress,
+  punchlistVerifierMetric,
 } from "../extensions/pi-multiloop/modes.js";
 
 let cwd: string;
@@ -73,6 +74,7 @@ describe("parsePunchlist", () => {
     expect(items).toHaveLength(2);
     expect(items[0].text).toBe("do the thing");
     expect(items[0].checked).toBe(false);
+    expect(items[0].state).toBe("open");
     expect(items[1].text).toBe("another task");
     expect(items[1].checked).toBe(false);
   });
@@ -82,15 +84,21 @@ describe("parsePunchlist", () => {
     const items = parsePunchlist(content);
     expect(items).toHaveLength(2);
     expect(items[0].checked).toBe(true);
+    expect(items[0].state).toBe("done");
     expect(items[1].checked).toBe(true);
+    expect(items[1].state).toBe("done");
   });
 
-  it("handles mixed checked/unchecked", () => {
-    const content = "- [x] done\n- [ ] todo\n- [ ] another";
+  it("handles mixed checked/partial/unchecked", () => {
+    const content = "- [x] done\n- [~] partial because blocked upstream\n- [ ] another";
     const items = parsePunchlist(content);
     expect(items[0].checked).toBe(true);
+    expect(items[0].state).toBe("done");
     expect(items[1].checked).toBe(false);
+    expect(items[1].state).toBe("partial");
+    expect(items[1].text).toBe("partial because blocked upstream");
     expect(items[2].checked).toBe(false);
+    expect(items[2].state).toBe("open");
   });
 
   it("preserves line numbers", () => {
@@ -122,20 +130,14 @@ describe("parsePunchlist", () => {
 
 describe("nextUncheckedItem", () => {
   it("returns first unchecked item", () => {
-    const items = [
-      { index: 0, text: "a", checked: true, line: 1 },
-      { index: 1, text: "b", checked: false, line: 2 },
-      { index: 2, text: "c", checked: false, line: 3 },
-    ];
+    const items = parsePunchlist("- [x] a\n- [~] b\n- [ ] c");
     const next = nextUncheckedItem(items);
     expect(next).not.toBeNull();
     expect(next!.text).toBe("b");
   });
 
   it("returns null when all checked", () => {
-    const items = [
-      { index: 0, text: "a", checked: true, line: 1 },
-    ];
+    const items = parsePunchlist("- [x] a");
     expect(nextUncheckedItem(items)).toBeNull();
   });
 
@@ -152,6 +154,14 @@ describe("checkOffItem", () => {
     const content = readFileSync(filePath, "utf-8");
     expect(content).toContain("- [x] task one");
     expect(content).toContain("- [ ] task two");
+  });
+
+  it("checks off a partial item", () => {
+    const filePath = join(cwd, "checklist.md");
+    writeFileSync(filePath, "- [~] partially done\n");
+    checkOffItem(filePath, 1);
+    const content = readFileSync(filePath, "utf-8");
+    expect(content).toBe("- [x] partially done\n");
   });
 
   it("is idempotent (no double-check)", () => {
@@ -175,35 +185,41 @@ describe("checkOffItem", () => {
 
 describe("punchlistProgress", () => {
   it("calculates 0% for all unchecked", () => {
-    const items = [
-      { index: 0, text: "a", checked: false, line: 1 },
-      { index: 1, text: "b", checked: false, line: 2 },
-    ];
+    const items = parsePunchlist("- [ ] a\n- [ ] b");
     const progress = punchlistProgress(items);
     expect(progress.total).toBe(2);
     expect(progress.done).toBe(0);
+    expect(progress.open).toBe(2);
+    expect(progress.partial).toBe(0);
     expect(progress.remaining).toBe(2);
     expect(progress.pct).toBe(0);
   });
 
   it("calculates 100% for all checked", () => {
-    const items = [
-      { index: 0, text: "a", checked: true, line: 1 },
-    ];
+    const items = parsePunchlist("- [x] a");
     const progress = punchlistProgress(items);
     expect(progress.pct).toBe(100);
     expect(progress.remaining).toBe(0);
   });
 
   it("calculates partial progress", () => {
-    const items = [
-      { index: 0, text: "a", checked: true, line: 1 },
-      { index: 1, text: "b", checked: false, line: 2 },
-      { index: 2, text: "c", checked: false, line: 3 },
-    ];
+    const items = parsePunchlist("- [x] a\n- [~] b\n- [ ] c");
     const progress = punchlistProgress(items);
     expect(progress.done).toBe(1);
+    expect(progress.partial).toBe(1);
+    expect(progress.open).toBe(1);
+    expect(progress.remaining).toBe(2);
     expect(progress.pct).toBe(33);
+  });
+
+  it("emits a lower-is-better verifier metric for open or partial items", () => {
+    const metric = punchlistVerifierMetric(parsePunchlist("- [x] a\n- [~] b\n- [ ] c"));
+
+    expect(metric.metricName).toBe("open_or_partial_items");
+    expect(metric.value).toBe(2);
+    expect(metric.direction).toBe("lower");
+    expect(metric.output).toContain("metric: 2");
+    expect(metric.output).toContain("partial: 1");
   });
 
   it("returns 100% for empty list", () => {

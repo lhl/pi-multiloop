@@ -20,7 +20,7 @@ You are managing an autonomous iteration loop using pi-multiloop. When the user 
 Analyze the user's goal to detect the appropriate mode:
 
 - **optimize**: Performance work, kernel tuning, latency reduction, throughput improvement. Uses edit→measure→keep/revert.
-- **punchlist**: Completing a checklist from a file (e.g., `docs/PLAN.md`, `TODO.md`). Iterates until all `[ ]` items are `[x]`.
+- **punchlist**: Completing a checklist from a file (e.g., `docs/PLAN.md`, `TODO.md`). Tracks `[ ]` open, `[x]` done, and `[~]` partial/blocked items; defaults to log/progress acceptance until all open/partial items are resolved.
 - **research**: Ablation studies, parameter sweeps, comparisons. Logs all results without keep/revert.
 - **dev**: General development — implement features, fix bugs, iterate until tests pass.
 
@@ -54,7 +54,7 @@ When a loop is active:
 1. **Each iteration**: Use `multiloop_iterate` before making changes, run verify/guard/prompt verifier, use `multiloop_measure` with `checks` when applicable, then `multiloop_decide` to keep/revert or `multiloop_log` for log-only modes.
 2. **After decide/log**: If the tool reports the loop is still running, continue to the next iteration instead of summarizing.
 3. **Monitor escalation**: If the agent gets 3 consecutive failures, it should refine. At 5, pivot. At 2 pivots exhausted, stop.
-4. **Punchlist mode**: Read the checklist file, pick the next unchecked item, implement it, run guard, check it off.
+4. **Punchlist mode**: Read the checklist file, pick the next `[ ]` open or `[~]` partial item, implement it, run guard, then mark `[x]` when done or `[~]` with a reason if intentionally partial/blocked.
 5. **Research mode**: Use `multiloop_log` instead of decide — record all results for later comparison.
 
 ## Steerability

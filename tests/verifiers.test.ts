@@ -35,13 +35,27 @@ describe("compound verifier acceptance", () => {
     expect(result.acceptanceReason).toContain("metric did not improve");
   });
 
-  it("logs research/dev iterations while preserving check pass status", () => {
+  it("logs research/dev/punchlist iterations while preserving check pass status", () => {
     const result = assessAcceptance({ mode: "research" }, true, [
       { name: "candidate review", kind: "prompt", passed: false },
+    ]);
+    const punchlist = assessAcceptance({ mode: "punchlist", acceptanceMode: "log" }, false, [
+      { name: "progress metric", kind: "mechanical", passed: true },
     ]);
 
     expect(result.recommendedAction).toBe("log");
     expect(result.acceptancePassed).toBe(false);
+    expect(punchlist.recommendedAction).toBe("log");
+    expect(punchlist.acceptancePassed).toBe(true);
+  });
+
+  it("allows explicit keep/revert acceptance for punchlist optimization loops", () => {
+    const result = assessAcceptance({ mode: "punchlist", acceptanceMode: "keep-revert" }, true, [
+      { name: "tests", passed: true },
+    ]);
+
+    expect(result.recommendedAction).toBe("keep");
+    expect(result.acceptancePassed).toBe(true);
   });
 
   it("adds failing checks for configured guard/prompt verifiers that are not reported", () => {

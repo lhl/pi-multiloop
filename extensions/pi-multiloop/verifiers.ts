@@ -68,7 +68,7 @@ export function ensureRequiredChecks(
 }
 
 export function assessAcceptance(
-  state: Pick<LoopState, "mode">,
+  state: Pick<LoopState, "mode"> & Partial<Pick<LoopState, "acceptanceMode">>,
   metricImproved: boolean,
   checks: VerificationCheck[] | undefined
 ): AcceptanceAssessment {
@@ -80,7 +80,9 @@ export function assessAcceptance(
       ? "all checks passed"
       : `failed checks: ${normalized.filter((check) => !check.passed).map((check) => check.name).join(", ")}`;
 
-  if (state.mode === "research" || state.mode === "dev") {
+  const acceptanceMode = state.acceptanceMode ?? (state.mode === "optimize" ? "keep-revert" : "log");
+
+  if (acceptanceMode === "log") {
     return {
       checks: normalized,
       checksPassed: allChecksPassed,
