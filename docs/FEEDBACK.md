@@ -880,7 +880,7 @@ prompt-for-the-LLM, not a stop sign.
 
 ## Section 5 — Unified Cleanup Roadmap
 
-A second reviewer (Sonnet 4.5/5.5) read Sections 1-4 and proposed a
+A second reviewer (GPT-5.5) read Sections 1-4 and proposed a
 different *batching* for the same items: smaller batches grouped by
 risk surface, with a clear publish gate. Their batching is better than
 the per-section "single PR" sketches in Sections 2-4 because it
