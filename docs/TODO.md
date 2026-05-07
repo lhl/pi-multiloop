@@ -81,10 +81,10 @@ Keep tasks bite-sized and commit each logical unit separately.
 
 ### Optional follow-ons
 
-- [ ] Wire a real Pi-native status widget only if the existing footer/status/list surfaces are insufficient.
-- [ ] Composite modes, e.g. punchlist where each item can spawn an optimize sub-loop.
-- [ ] Structured lessons schema for `lessons.md` entries.
-- [ ] Typed resume-health decision for clean resume vs repaired resume vs fresh start.
-- [ ] Web-search escalation rung after pivot exhaustion.
-- [ ] CI / trusted npm publishing.
-- [ ] Lane-level `.gitignore` hint for `.multiloop/`.
+- [~] Wire a real Pi-native status widget only if the existing footer/status/list surfaces are insufficient — deferred because current footer, resumable notice, `/multiloop`, `/multiloop status`, and `/multiloop ls` surfaces are sufficient for 0.3.0.
+- [~] Composite modes, e.g. punchlist where each item can spawn an optimize sub-loop — deferred; current `acceptanceMode` covers the immediate punchlist/progress vs keep-revert need without nested loop orchestration.
+- [~] Structured lessons schema for `lessons.md` entries — deferred until lessons are consumed programmatically; freeform pivot notes remain adequate.
+- [~] Typed resume-health decision for clean resume vs repaired resume vs fresh start — deferred until we see real corrupted/partial state cases beyond current reconstruction and refusal paths.
+- [~] Web-search escalation rung after pivot exhaustion — deferred to preserve local/repo-first behavior and avoid introducing web dependency into the core loop.
+- [~] CI / trusted npm publishing — deferred; local `tsc`, `vitest`, and `pi install .` smoke pass for 0.3.0, but CI credentials/publishing policy are outside this code pass.
+- [x] Lane-level `.gitignore` hint for `.multiloop/`.
