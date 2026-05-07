@@ -21,7 +21,7 @@ Other loop extensions only support one loop per session or worktree. If you're t
 - **Mechanical continuation** — loop-owned turns automatically queue the next required action while the loop remains running, while still allowing brief answers to user status questions
 - **Compaction-aware resume** — when pi auto-compacts during a loop explicitly started or resumed in the current session, pi-multiloop injects a loop-aware resume prompt after the interrupted turn ends
 - **Escalation** — refines strategy automatically after consecutive failures
-- **TUI dashboard** — live status and metric history per lane
+- **Pi-native status surfaces** — footer status, resumable-loop notices, and `/multiloop status` / `/multiloop ls` views
 
 ## Install
 
