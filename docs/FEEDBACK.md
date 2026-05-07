@@ -621,3 +621,259 @@ the next npm publish:
 That's a single PR's worth of work, fully consistent with the existing
 north stars, and it directly addresses the "the engine refuses an
 action and the agent doesn't know why" surface flagged in Section 2.
+
+## Section 4 — Concrete Cleanup: Intent-First, LLM-Routed Commands
+
+The user request that prompted this section: **bare `/multiloop` should
+show state and offer next moves, freeform input should drive a real
+compound-verifier setup pass, and bad parses should hand off to the LLM
+rather than erroring**. Those three asks are the same design pattern
+applied at three different surfaces — let it sit on top first, then enumerate
+the changes.
+
+### The pattern: intent in, typed call out
+
+Today the `/multiloop` command handler (`index.ts:1207-1432`) is a strict
+parser: each subcommand has a fixed argument shape (`lane/run-tag`,
+`lane`, or none), bad input → `ctx.ui.notify(..., "error")`, and the only
+LLM-driven path is the bare-empty case (which jumps straight to
+`buildSetupGuidePrompt`). That mirrors the wrong half of the system —
+`multiloop_iterate` / `_measure` / `_decide` / `_log` are typed *agent*
+calls, but the *human* surface is also typed and brittle.
+
+The user pattern (used in realitycheck, outline-edit, shisad-dev) is:
+the human types intent, the slash command captures it as a follow-up
+prompt with the surrounding state attached, and the LLM constructs the
+syntactically correct tool call. The command handler's job is to
+**collect intent + relevant context**, not to **parse arguments**. It
+only short-circuits when the input is unambiguous and zero-cost (e.g.,
+`/multiloop status` is a pure render with no LLM round-trip needed).
+
+For this to work, every "human op" (resume, pause, stop, archive, rm,
+new loop) needs (a) a typed tool the LLM can call and (b) a fallback
+path in the slash handler that emits a follow-up prompt rather than an
+error. Today only `multiloop_start` exists; pause/stop/resume/archive/rm
+are slash-only, so even when the LLM knows what the user means, it has
+no typed call to make.
+
+### Cleanup item 4.1 — Bare `/multiloop` becomes status-first
+
+**Symptom.** `index.ts:1364-1367`: `if (!trimmed || trimmed === "guide"
+|| ...)` jumps to the setup guide. A returning user with three active
+loops who types `/multiloop` to "see what's going on" gets a "let's
+design a new loop" prompt — the wrong default. The "available to
+resume" notice only fires on `session_start`, not on `/multiloop`.
+
+**Change.** Make bare `/multiloop` a unified state-first view that
+always shows what exists and routes the next action:
+
+- registry empty → short helper text + "Describe what you want to
+  optimize, build, research, or work through. I'll scan the repo and
+  propose a loop." This is the only path that goes straight to the
+  setup guide.
+- attached loops exist → show them first (active, descending by
+  `state.lastUpdated`), then show registry-active-but-detached loops
+  (resumable), then a one-line archive summary
+  (`12 archived, last: perf/run-... 2 days ago`). End with a
+  next-actions hint: "Continue active, resume <name>, start new
+  (describe), pause/stop/archive [name], or `/multiloop help`."
+- registry has only completed/paused loops → similar shape but lead
+  with "no active loops" and the resumable list.
+
+**Implementation sketch.**
+
+- Add `loopSummary` ordering: sort registry by
+  `state.lastUpdated ?? entry.startedAt` desc (loaded once per call).
+- Split into three buckets: `attached` (in `activeStates`),
+  `resumable` (registry `active`, not attached), `inactive`
+  (`paused | completed`). Render each bucket in its own block.
+- Archive summary: count entries with `status === "archived"` plus the
+  most recent one — no per-archive detail. If the user wants detail,
+  they call `/multiloop ls --archived` (new flag).
+- Re-use the renderer in `colorizeResumableLoopsNotice`'s style for
+  consistency with the startup notice.
+- After rendering, if the user wants to take action on something they
+  saw, the *next* user message goes to the LLM, which can call
+  `multiloop_resume` / `_pause` / `_stop` / `_archive` / `_rm` /
+  `_start` (new tools — see 4.4) without further parsing.
+
+### Cleanup item 4.2 — `/multiloop ls` becomes reverse-chronological with archive collapse
+
+**Symptom.** `index.ts:1315-1331` walks the registry in insertion order
+and renders every entry equally — including archived ones, which
+quickly drown the active-loop signal in noise.
+
+**Change.**
+
+- Sort by `state.lastUpdated ?? entry.startedAt` descending.
+- Group: `[active]`, `[paused]`, `[completed]`, then a single
+  `[archived: N — last <id> @ <ts>]` line.
+- Add `/multiloop ls --archived` (or `/multiloop ls all`) to expand the
+  archive into full rows.
+- Empty case: don't `ctx.ui.notify("No loops registered.")`; render the
+  same status-first frame bare `/multiloop` uses, so `ls` and bare
+  match instead of diverging on the empty case.
+
+This also fixes the inconsistency Section 1 / B5 flagged: `ls` becomes
+the single canonical "what's here" view, with `status` as the active-
+focus subset.
+
+### Cleanup item 4.3 — Freeform input always goes through the guide
+
+**Symptom.** `index.ts:1404-1432` — when input doesn't match any
+subcommand, `extractQuotedOption` regex-mines `verify:` / `guard:` /
+`prompt verifier:` / `acceptance:`, defaults missing fields, and calls
+`startLoop` directly with whatever it found. This bypasses the guide
+entirely. Real prompts are not "verify: \`foo\`, guard: \`bar\`" —
+they're "go through `docs/TODO.md` but make sure tests pass and decode
+throughput keeps going up". The current parser captures none of that.
+
+**Change.** Treat *every* freeform input as a goal description for the
+guide flow. Replace the inline-parser path with:
+
+1. Capture the raw text as the `goal` payload.
+2. Send `buildSetupGuidePrompt()` as a follow-up, with the user's
+   freeform text appended as the goal seed:
+   `Help me create a high-quality pi-multiloop run. The user said:
+   "<raw text>". Scan the repo, propose a compound config, and
+   confirm.`
+3. The guide flow already calls `multiloop_start` after explicit
+   approval — so the existing tool surface is unchanged; only the
+   command handler's branching changes.
+
+The regex parser (`extractQuotedOption`) becomes dead code. Delete it
+and the `extractQuotedOption(trimmed, ["verify"])` block in the slash
+handler.
+
+**Why this is correct for compound goals.** The user's example —
+"go through this punchlist but also keep these numbers going up, run
+these ablations or do this sweep but also track the loss and gradient
+norms for health" — is exactly what the guide flow's compound-verifier
+proposal step is designed for (`docs/LOOP_GUIDE.md:46-57`). Forcing
+*all* inline input through that step means agents stop trying to map
+multi-modal goals onto a single regex-matched `verify:` and start
+building real `verify` + `guard` + `prompt verifier` + `checks`
+combinations. This is the largest single quality lift available
+without writing new engine code.
+
+### Cleanup item 4.4 — Add typed tools for human ops
+
+**Symptom.** Pause/stop/resume/archive/rm are slash-only. When the LLM
+disambiguates `/multiloop resume perf` (one-of-three runs in lane
+`perf`), it has no way to *call* the right resume operation — it has
+to print "please run `/multiloop resume perf/run-20260507-220838`" and
+hope the user copies it.
+
+**Change.** Add tools mirroring the existing `multiloop_start`:
+
+- `multiloop_resume({ lane, runTag })`
+- `multiloop_pause({ lane?, runTag? })`
+- `multiloop_stop({ lane?, runTag? })`
+- `multiloop_archive({ lane?, runTag? })` (omit both → archive all
+  eligible)
+- `multiloop_rm({ lane, runTag })` (always strict — destructive)
+
+Each tool is a thin wrapper over the existing slash-command logic —
+the underlying state mutations already exist, this just exposes them
+to the LLM with a typed schema. With these in place, the slash
+handler's job for ambiguous input becomes: emit a follow-up prompt
+with the registry snapshot and the user's raw words, and let the LLM
+pick the right tool.
+
+### Cleanup item 4.5 — Slash arg parse failure → LLM hand-off, not error
+
+**Symptom.** `index.ts:1213` (resume), `index.ts:1347` (rm), implicit
+in archive — `parseLaneId` returns null for any non-`lane/run-tag`
+input and the handler `ctx.ui.notify(..., "error")`s. There is no
+fallback. `/multiloop resume perf` (lane only), `/multiloop resume the
+kernel one` (natural language), `/multiloop resume yesterday`
+(temporal) all hit the wall.
+
+**Change.** Replace the error path with an LLM hand-off:
+
+```
+On parse failure for resume/pause/stop/archive/rm:
+  1. Build a "disambiguate" follow-up prompt that includes:
+     - the user's raw input,
+     - the full registry snapshot (lanes, run-tags, status,
+       startedAt, lastUpdated, current/best metric),
+     - the available typed tools (multiloop_resume, _pause, etc.),
+     - the rule: "If the user's input matches exactly one loop,
+       call the appropriate tool. If it matches none or several,
+       ask the user to choose."
+  2. Send via pi.sendUserMessage(prompt, { deliverAs: "followUp" }).
+  3. markLoopTurn("disambiguate") so auto-continue does not fire
+     until the LLM resolves the ambiguity.
+```
+
+The strict path stays for `lane/run-tag` exact matches — those skip
+the LLM round-trip and act immediately. Everything else delegates.
+This is the realitycheck/outline-edit/shisad-dev pattern applied to
+the loop control surface.
+
+**Bonus: pluralize gracefully.** `/multiloop pause` (no arg) today
+pauses every active lane in one shot. Under the LLM-route, that
+becomes "the user said `pause`, there are 3 active loops, ask them
+which" by default — and the slash handler can keep the
+`pause-everything` shortcut behind an explicit `pause --all` flag.
+
+### Cleanup item 4.6 — Unify `archive` argument shape
+
+While touching the dispatch table, fix Section 1 / B5: archive
+currently accepts `archive` (= archive-all) or `archive <lane/run-tag>`
+(= one loop), but `archive someLane` errors. Under 4.5, that error
+case becomes an LLM hand-off automatically — no new code needed,
+just remove the explicit error branch.
+
+### Implementation order (single PR-sized chunks)
+
+1. **PR A — typed tools for human ops (item 4.4).** Lowest risk,
+   purely additive. Existing slash handlers stay; tools call the same
+   internal helpers. Adds ~80 lines and a `tests/index.test.ts` block
+   per tool.
+2. **PR B — bare `/multiloop` and `ls` reorganization (items 4.1, 4.2).**
+   Renderer changes only; no new persistence. Add `--archived` flag.
+   Update README + skill to document the new defaults.
+3. **PR C — freeform → guide flow (item 4.3).** Delete
+   `extractQuotedOption` and the inline `startLoop` call. The guide
+   flow then handles everything that isn't a known subcommand. Update
+   `index.test.ts` to cover the seed-prompt shape.
+4. **PR D — LLM hand-off on parse failure (items 4.5, 4.6).** Depends
+   on PR A (tools must exist for the LLM to call). Replace the four
+   `parseLaneId` error paths with disambiguation follow-ups.
+5. **PR E — doc unification.** Update `skills/multiloop/skill.md` and
+   `docs/LOOP_GUIDE.md` to describe the new default behaviors. Cite
+   the "intent-first, typed-call-out" pattern by name so future
+   commands inherit it.
+
+The total surface area is roughly the same as the v0.2 ratchet
+described in Section 2 — same single-PR-per-chunk discipline. The
+key shift is moving the strictness *inward*: the engine still refuses
+malformed measurements / decisions / acceptance verdicts, but the
+human surface goes the other way and treats parse failure as a
+prompt-for-the-LLM, not a stop sign.
+
+### Why this is consistent with the north stars
+
+- **"Use existing benchmark scripts"** (`docs/PLAN.md:13`) — unchanged.
+  The guide flow already proposes verify/guard/prompt verifier from
+  what's in the repo; routing all input through it strengthens that.
+- **"Steerability"** (`docs/PLAN.md:19`) — strictly improved. Today the
+  user must speak the parser's grammar; under 4.5 the LLM speaks the
+  user's natural phrasing back into typed calls.
+- **"Minimal state files"** (`docs/PLAN.md:21`) — unchanged. No new
+  state, just new tools and renderers.
+- **"Two-phase boundary"** (Section 3, item 8) — *strengthened*. The
+  guide owns Phase 1 (setup) consistently for every input shape, not
+  just bare `/multiloop`.
+
+### What this section does *not* propose
+
+- It doesn't auto-attach loops on `session_start` — Section 2 covered
+  that; the explicit-resume default stays.
+- It doesn't move per-iteration behaviors (multiloop_iterate / measure
+  / decide) to LLM-routed dispatch. Those are the strict ratchet and
+  should remain typed.
+- It doesn't introduce a "natural-language tool call" layer for
+  *anything*; only the human-facing slash surface delegates. The
+  agent-facing tool surface stays JSON-schemed.
