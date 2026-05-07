@@ -28,8 +28,25 @@ export interface Registry {
 const BASE_DIR = ".multiloop";
 const REGISTRY_FILE = `${BASE_DIR}/registry.json`;
 const STATE_BASE = `${BASE_DIR}/active`;
+const ID_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+export function validateLaneId(id: LaneId): string | null {
+  if (!ID_PART_PATTERN.test(id.lane)) {
+    return `Invalid lane "${id.lane}". Use 1-64 letters, numbers, dots, underscores, or hyphens, starting with a letter or number.`;
+  }
+  if (!ID_PART_PATTERN.test(id.runTag)) {
+    return `Invalid run tag "${id.runTag}". Use 1-64 letters, numbers, dots, underscores, or hyphens, starting with a letter or number.`;
+  }
+  return null;
+}
+
+export function assertValidLaneId(id: LaneId): void {
+  const error = validateLaneId(id);
+  if (error) throw new Error(error);
+}
 
 export function laneDir(cwd: string, id: LaneId): string {
+  assertValidLaneId(id);
   return resolve(cwd, STATE_BASE, id.lane, id.runTag);
 }
 
@@ -57,6 +74,7 @@ export function ensureLaneDir(cwd: string, id: LaneId): string {
 }
 
 export function registerLoop(cwd: string, entry: RegistryEntry): void {
+  assertValidLaneId(entry);
   const registry = readRegistry(cwd);
   const existing = registry.loops.findIndex(
     (l) => l.lane === entry.lane && l.runTag === entry.runTag
@@ -144,11 +162,13 @@ export function generateRunTag(): string {
 }
 
 export function parseLaneId(input: string): LaneId | null {
-  const parts = input.split("/");
-  if (parts.length === 2 && parts[0] && parts[1]) {
-    return { lane: parts[0], runTag: parts[1] };
+  const parts = input.trim().split("/");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    return null;
   }
-  return null;
+
+  const id = { lane: parts[0], runTag: parts[1] };
+  return validateLaneId(id) ? null : id;
 }
 
 export function formatLaneId(id: LaneId): string {

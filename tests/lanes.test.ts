@@ -15,6 +15,7 @@ import {
   generateRunTag,
   parseLaneId,
   formatLaneId,
+  validateLaneId,
   type LaneId,
   type RegistryEntry,
 } from "../extensions/pi-multiloop/lanes.js";
@@ -145,8 +146,24 @@ describe("identifiers", () => {
 
   it("parses lane/run-tag strings", () => {
     expect(parseLaneId("perf/run-001")).toEqual({ lane: "perf", runTag: "run-001" });
+    expect(parseLaneId(" perf/run-001 ")).toEqual({ lane: "perf", runTag: "run-001" });
     expect(parseLaneId("invalid")).toBeNull();
     expect(parseLaneId("a/b/c")).toBeNull();
+  });
+
+  it("rejects unsafe lane IDs", () => {
+    expect(parseLaneId("../run-001")).toBeNull();
+    expect(parseLaneId("perf/..")).toBeNull();
+    expect(parseLaneId("perf/.hidden")).toBeNull();
+    expect(parseLaneId("perf/run 001")).toBeNull();
+    expect(parseLaneId("perf/run/../../oops")).toBeNull();
+    expect(validateLaneId({ lane: "perf", runTag: "run_001.2" })).toBeNull();
+    expect(validateLaneId({ lane: "..", runTag: "run-001" })).toContain("Invalid lane");
+  });
+
+  it("refuses to construct paths for unsafe IDs", () => {
+    expect(() => laneDir(cwd, { lane: "..", runTag: "run-001" })).toThrow(/Invalid lane/);
+    expect(() => ensureLaneDir(cwd, { lane: "perf", runTag: "../run-001" })).toThrow(/Invalid run tag/);
   });
 
   it("formats lane IDs", () => {
