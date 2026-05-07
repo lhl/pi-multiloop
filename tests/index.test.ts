@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAutoContinuePrompt, buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsNotice, buildSetupGuidePrompt, colorizeResumableLoopsNotice, decideCompactionResumeTiming, formatLoopList, formatLoopStatusOverview } from "../extensions/pi-multiloop/index.js";
+import { buildAutoContinuePrompt, buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsNotice, buildSetupGuidePrompt, buildTargetDisambiguationPrompt, colorizeResumableLoopsNotice, decideCompactionResumeTiming, formatLoopList, formatLoopStatusOverview } from "../extensions/pi-multiloop/index.js";
 import { createInitialState } from "../extensions/pi-multiloop/state.js";
 import type { RegistryEntry } from "../extensions/pi-multiloop/lanes.js";
 
@@ -186,6 +186,23 @@ describe("formatLoopList", () => {
 
     expect(output).toContain("Archived:");
     expect(output).toContain("arch/run-004");
+  });
+});
+
+describe("buildTargetDisambiguationPrompt", () => {
+  it("asks the model to use typed tools or ask the user", () => {
+    const prompt = buildTargetDisambiguationPrompt("pause", "perf", {
+      status: "ambiguous",
+      input: "perf",
+      matches: [entry({ runTag: "run-001" }), entry({ runTag: "run-002" })],
+      message: "Lane matches multiple loops.",
+    }, [entry({ runTag: "run-001" }), entry({ runTag: "run-002" })]);
+
+    expect(prompt).toContain("Resolve a pi-multiloop pause request");
+    expect(prompt).toContain("Requested target: perf");
+    expect(prompt).toContain("multiloop_pause");
+    expect(prompt).toContain("ask the user to choose");
+    expect(prompt).toContain("perf/run-001");
   });
 });
 

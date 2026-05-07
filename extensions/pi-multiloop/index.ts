@@ -11,6 +11,8 @@ import {
   generateRunTag,
   parseLaneId,
   formatLaneId,
+  resolveLoopTarget,
+  type TargetResolution,
   archiveLoop as archiveLaneDirs,
   deleteLaneDirs,
   readRegistry,
@@ -400,6 +402,32 @@ export function formatLoopStatusOverview(
   }
 
   return lines.join("\n");
+}
+
+function registrySnapshot(loops: RegistryEntry[]): string {
+  if (loops.length === 0) return "  (registry is empty)";
+  return sortedLoops(loops)
+    .map((loop) => `  - ${loop.lane}/${loop.runTag} [${loop.status}] mode=${loop.mode} started=${loop.startedAt || "unknown"}`)
+    .join("\n");
+}
+
+export function buildTargetDisambiguationPrompt(
+  operation: "resume" | "pause" | "stop" | "archive",
+  target: string,
+  resolution: TargetResolution,
+  loops: RegistryEntry[]
+): string {
+  const toolName = `multiloop_${operation}`;
+  return [
+    `Resolve a pi-multiloop ${operation} request.`,
+    `Requested target: ${target.trim() || "(empty)"}`,
+    `Resolver result: ${resolution.status}${"message" in resolution ? ` — ${resolution.message}` : ""}`,
+    "",
+    "Registry snapshot:",
+    registrySnapshot(loops),
+    "",
+    `If the intended loop is clear, call ${toolName} with the exact lane/run-tag target. If it is ambiguous or unsafe, ask the user to choose an exact lane/run-tag. Do not start a new loop.`,
+  ].join("\n");
 }
 
 interface ResumableLoopsNoticeStyle {
@@ -1188,6 +1216,177 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  function resolveCommandTarget(
+    operation: "resume" | "pause" | "stop" | "archive",
+    target: string,
+    ctx: ExtensionCommandContext,
+    statuses: RegistryEntry["status"][]
+  ): TargetResolution {
+    const registry = readRegistry(ctx.cwd);
+    const resolution = resolveLoopTarget(registry.loops, target, { statuses });
+    if (resolution.status !== "resolved") {
+      ctx.ui.notify("Could not resolve multiloop target; handing off to the agent.", "error");
+      pi.sendUserMessage(buildTargetDisambiguationPrompt(operation, target, resolution, registry.loops), { deliverAs: "followUp" });
+    }
+    return resolution;
+  }
+
+  function resumeLoop(ctx: ExtensionContext | ExtensionCommandContext, id: LaneId): LoopState | null {
+    const state = reconstructState(ctx.cwd, id);
+    if (!state) return null;
+    state.status = "running";
+    saveState(ctx.cwd, id, state);
+    activeStates.set(stateKey(id), state);
+    updateLoopStatus(ctx.cwd, id, "active");
+    updateStatus(ctx);
+    return state;
+  }
+
+  function pauseLoop(ctx: ExtensionContext | ExtensionCommandContext, id: LaneId): string {
+    const key = stateKey(id);
+    const state = activeStates.get(key) ?? reconstructState(ctx.cwd, id);
+    if (!state) return `No state found for ${formatLaneId(id)}.`;
+
+    state.status = "paused";
+    saveState(ctx.cwd, id, state);
+    updateLoopStatus(ctx.cwd, id, "paused");
+    activeStates.delete(key);
+    updateStatus(ctx);
+    return `Paused loop ${formatLaneId(id)}.`;
+  }
+
+  function stopLoop(ctx: ExtensionContext | ExtensionCommandContext, id: LaneId): string {
+    const key = stateKey(id);
+    const state = activeStates.get(key) ?? reconstructState(ctx.cwd, id);
+    if (!state) return `No state found for ${formatLaneId(id)}.`;
+
+    state.status = "stopped";
+    saveState(ctx.cwd, id, state);
+    updateLoopStatus(ctx.cwd, id, "completed");
+    activeStates.delete(key);
+    updateStatus(ctx);
+    return `Stopped loop ${formatLaneId(id)}.`;
+  }
+
+  function archiveLoopTarget(ctx: ExtensionContext | ExtensionCommandContext, id: LaneId): string {
+    const loop = getLoop(ctx.cwd, id);
+    if (!loop) return `No loop found: ${formatLaneId(id)}.`;
+    const summary = loopSummary(ctx.cwd, loop);
+    archiveLaneDirs(ctx.cwd, id);
+    activeStates.delete(stateKey(id));
+    updateStatus(ctx);
+    return `Archived ${summary}.`;
+  }
+
+  function pauseAllActive(ctx: ExtensionCommandContext): string[] {
+    const lines: string[] = [];
+    const registry = readRegistry(ctx.cwd);
+    const attached = new Set<string>();
+
+    for (const [key, state] of activeStates.entries()) {
+      if (state.status !== "running") continue;
+      attached.add(key);
+      lines.push(pauseLoop(ctx, { lane: state.lane, runTag: state.runTag }));
+    }
+
+    for (const entry of registry.loops) {
+      const key = `${entry.lane}/${entry.runTag}`;
+      if (entry.status === "active" && !attached.has(key)) {
+        lines.push(pauseLoop(ctx, { lane: entry.lane, runTag: entry.runTag }));
+      }
+    }
+
+    return lines;
+  }
+
+  function stopAllActive(ctx: ExtensionCommandContext): string[] {
+    const lines: string[] = [];
+    const registry = readRegistry(ctx.cwd);
+    const attached = new Set<string>();
+
+    for (const [key, state] of activeStates.entries()) {
+      if (state.status !== "running") continue;
+      attached.add(key);
+      lines.push(stopLoop(ctx, { lane: state.lane, runTag: state.runTag }));
+    }
+
+    for (const entry of registry.loops) {
+      const key = `${entry.lane}/${entry.runTag}`;
+      if (entry.status === "active" && !attached.has(key)) {
+        lines.push(stopLoop(ctx, { lane: entry.lane, runTag: entry.runTag }));
+      }
+    }
+
+    return lines;
+  }
+
+  const HumanOperationParams = Type.Object({
+    target: Type.String({ description: "Loop target as exact lane/run-tag, or lane-only when unambiguous" }),
+  });
+
+  pi.registerTool({
+    name: "multiloop_resume",
+    label: "Multiloop Resume",
+    description: "Resume a paused, stopped, or detached pi-multiloop. Use after resolving the target; exact lane/run-tag is safest.",
+    parameters: HumanOperationParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const registry = readRegistry(ctx.cwd);
+      const resolution = resolveLoopTarget(registry.loops, params.target, { statuses: ["active", "paused", "completed"] });
+      if (resolution.status !== "resolved") {
+        return textResult(buildTargetDisambiguationPrompt("resume", params.target, resolution, registry.loops));
+      }
+      const state = resumeLoop(ctx, resolution.id);
+      if (!state) return textResult(`No state found for ${formatLaneId(resolution.id)}.`);
+      markLoopTurn("tool-resume");
+      return textResult(`Resumed loop ${formatLaneId(resolution.id)} at iteration ${state.iteration}.\n\n${buildExplicitResumePrompt([state])}`);
+    },
+  });
+
+  pi.registerTool({
+    name: "multiloop_pause",
+    label: "Multiloop Pause",
+    description: "Pause a running or resumable pi-multiloop. Use exact lane/run-tag, or lane-only when unambiguous.",
+    parameters: HumanOperationParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const registry = readRegistry(ctx.cwd);
+      const resolution = resolveLoopTarget(registry.loops, params.target, { statuses: ["active", "paused"] });
+      if (resolution.status !== "resolved") {
+        return textResult(buildTargetDisambiguationPrompt("pause", params.target, resolution, registry.loops));
+      }
+      return textResult(pauseLoop(ctx, resolution.id));
+    },
+  });
+
+  pi.registerTool({
+    name: "multiloop_stop",
+    label: "Multiloop Stop",
+    description: "Stop a running, paused, or detached pi-multiloop without deleting files. Use exact lane/run-tag, or lane-only when unambiguous.",
+    parameters: HumanOperationParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const registry = readRegistry(ctx.cwd);
+      const resolution = resolveLoopTarget(registry.loops, params.target, { statuses: ["active", "paused", "completed"] });
+      if (resolution.status !== "resolved") {
+        return textResult(buildTargetDisambiguationPrompt("stop", params.target, resolution, registry.loops));
+      }
+      return textResult(stopLoop(ctx, resolution.id));
+    },
+  });
+
+  pi.registerTool({
+    name: "multiloop_archive",
+    label: "Multiloop Archive",
+    description: "Archive a non-archived pi-multiloop by moving its state directory under .multiloop/archive. Use exact lane/run-tag, or lane-only when unambiguous.",
+    parameters: HumanOperationParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const registry = readRegistry(ctx.cwd);
+      const resolution = resolveLoopTarget(registry.loops, params.target, { statuses: ["active", "paused", "completed"] });
+      if (resolution.status !== "resolved") {
+        return textResult(buildTargetDisambiguationPrompt("archive", params.target, resolution, registry.loops));
+      }
+      return textResult(archiveLoopTarget(ctx, resolution.id));
+    },
+  });
+
   function showStatus(ctx: ExtensionCommandContext) {
     const running = runningStates();
     if (running.length > 0) {
@@ -1217,21 +1416,13 @@ export default function (pi: ExtensionAPI) {
     const trimmed = args.trim();
 
     if (trimmed) {
-      const id = parseLaneId(trimmed);
-      if (!id) {
-        ctx.ui.notify(`Invalid lane/run-tag: "${trimmed}". Format: lane/run-tag`, "error");
-        return;
+      const resolution = resolveCommandTarget("archive", trimmed, ctx, ["active", "paused", "completed"]);
+      if (resolution.status !== "resolved") return;
+      try {
+        ctx.ui.notify(archiveLoopTarget(ctx, resolution.id), "info");
+      } catch (err) {
+        ctx.ui.notify(`Archive failed for ${formatLaneId(resolution.id)}: ${(err as Error).message}`, "error");
       }
-      const loop = getLoop(ctx.cwd, id);
-      if (!loop) {
-        ctx.ui.notify(`No loop found: ${formatLaneId(id)}`, "error");
-        return;
-      }
-      const summary = loopSummary(ctx.cwd, loop);
-      archiveLaneDirs(ctx.cwd, id);
-      activeStates.delete(stateKey(id));
-      updateStatus(ctx);
-      ctx.ui.notify(`Archived ${summary}`, "info");
       return;
     }
 
@@ -1295,108 +1486,44 @@ export default function (pi: ExtensionAPI) {
     async handler(args, ctx) {
       const trimmed = args.trim();
 
-      if (trimmed.startsWith("resume")) {
-        const idStr = trimmed.replace(/^resume\s*/, "").trim();
-        const id = parseLaneId(idStr);
-        if (!id) {
-          ctx.ui.notify(`Invalid lane/run-tag: "${idStr}". Format: lane/run-tag`, "error");
-          return;
-        }
-        const state = reconstructState(ctx.cwd, id);
+      if (trimmed === "resume" || trimmed.startsWith("resume ")) {
+        const target = trimmed.replace(/^resume\s*/, "").trim();
+        const resolution = resolveCommandTarget("resume", target, ctx, ["active", "paused", "completed"]);
+        if (resolution.status !== "resolved") return;
+        const state = resumeLoop(ctx, resolution.id);
         if (!state) {
-          ctx.ui.notify(`No state found for ${formatLaneId(id)}`, "error");
+          ctx.ui.notify(`No state found for ${formatLaneId(resolution.id)}`, "error");
           return;
         }
-        state.status = "running";
-        saveState(ctx.cwd, id, state);
-        activeStates.set(stateKey(id), state);
-        updateLoopStatus(ctx.cwd, id, "active");
-        updateStatus(ctx);
-        ctx.ui.notify(`Resumed loop ${formatLaneId(id)} at iteration ${state.iteration}`, "info");
+        ctx.ui.notify(`Resumed loop ${formatLaneId(resolution.id)} at iteration ${state.iteration}`, "info");
         markLoopTurn("explicit-resume");
         pi.sendUserMessage(buildExplicitResumePrompt([state]), { deliverAs: "followUp" });
         return;
       }
 
       if (trimmed === "stop" || trimmed.startsWith("stop ")) {
-        const laneName = trimmed.replace(/^stop\s*/, "").trim();
-        let stopped = false;
-
-        for (const [key, state] of activeStates.entries()) {
-          if (!laneName || state.lane === laneName) {
-            const id: LaneId = { lane: state.lane, runTag: state.runTag };
-            state.status = "stopped";
-            saveState(ctx.cwd, id, state);
-            updateLoopStatus(ctx.cwd, id, "completed");
-            activeStates.delete(key);
-            ctx.ui.notify(`Stopped loop ${formatLaneId(id)}`, "info");
-            stopped = true;
-          }
+        const target = trimmed.replace(/^stop\s*/, "").trim();
+        if (!target) {
+          const lines = stopAllActive(ctx);
+          ctx.ui.notify(lines.length > 0 ? lines.join("\n") : "No active loops to stop.", "info");
+          return;
         }
-
-        if (!stopped) {
-          const registry = readRegistry(ctx.cwd);
-          for (const entry of registry.loops) {
-            if (entry.status === "active" && (!laneName || entry.lane === laneName)) {
-              const id: LaneId = { lane: entry.lane, runTag: entry.runTag };
-              updateLoopStatus(ctx.cwd, id, "completed");
-              const state = reconstructState(ctx.cwd, id);
-              if (state) {
-                state.status = "stopped";
-                saveState(ctx.cwd, id, state);
-              }
-              ctx.ui.notify(`Stopped loop ${formatLaneId(id)}`, "info");
-              stopped = true;
-            }
-          }
-        }
-
-        if (!stopped) {
-          ctx.ui.notify(laneName ? `No active loop in lane "${laneName}".` : "No active loops to stop.", "info");
-        }
-
-        updateStatus(ctx);
+        const resolution = resolveCommandTarget("stop", target, ctx, ["active", "paused", "completed"]);
+        if (resolution.status !== "resolved") return;
+        ctx.ui.notify(stopLoop(ctx, resolution.id), "info");
         return;
       }
 
       if (trimmed === "pause" || trimmed.startsWith("pause ")) {
-        const laneName = trimmed.replace(/^pause\s*/, "").trim();
-        let paused = false;
-
-        for (const [key, state] of activeStates.entries()) {
-          if (!laneName || state.lane === laneName) {
-            const id: LaneId = { lane: state.lane, runTag: state.runTag };
-            state.status = "paused";
-            saveState(ctx.cwd, id, state);
-            updateLoopStatus(ctx.cwd, id, "paused");
-            activeStates.delete(key);
-            ctx.ui.notify(`Paused loop ${formatLaneId(id)}`, "info");
-            paused = true;
-          }
+        const target = trimmed.replace(/^pause\s*/, "").trim();
+        if (!target) {
+          const lines = pauseAllActive(ctx);
+          ctx.ui.notify(lines.length > 0 ? lines.join("\n") : "No active loops to pause.", "info");
+          return;
         }
-
-        if (!paused) {
-          const registry = readRegistry(ctx.cwd);
-          for (const entry of registry.loops) {
-            if (entry.status === "active" && (!laneName || entry.lane === laneName)) {
-              const id: LaneId = { lane: entry.lane, runTag: entry.runTag };
-              updateLoopStatus(ctx.cwd, id, "paused");
-              const state = reconstructState(ctx.cwd, id);
-              if (state) {
-                state.status = "paused";
-                saveState(ctx.cwd, id, state);
-              }
-              ctx.ui.notify(`Paused loop ${formatLaneId(id)}`, "info");
-              paused = true;
-            }
-          }
-        }
-
-        if (!paused) {
-          ctx.ui.notify(laneName ? `No active loop in lane "${laneName}".` : "No active loops to pause.", "info");
-        }
-
-        updateStatus(ctx);
+        const resolution = resolveCommandTarget("pause", target, ctx, ["active", "paused"]);
+        if (resolution.status !== "resolved") return;
+        ctx.ui.notify(pauseLoop(ctx, resolution.id), "info");
         return;
       }
 

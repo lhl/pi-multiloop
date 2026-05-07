@@ -28,10 +28,10 @@ Keep tasks bite-sized and commit each logical unit separately.
 - [x] Route every freeform `/multiloop <text>` input through the setup guide with the text as the goal seed.
 - [x] Delete the inline regex start parser after freeform-to-guide routing lands; do not spend effort polishing a parser we plan to remove.
 - [x] Add a pure target resolver for command arguments and tests for it: exact `lane/run-tag`, lane-only, empty input, unknown input, and ambiguous lane matches.
-- [ ] Support lane-only `resume`, `pause`, `stop`, and `archive` when the target is unambiguous.
-- [ ] Keep `rm` strict and destructive-safe: require exact `lane/run-tag`; if exposed as a tool later, require confirmation or leave slash-only.
-- [ ] Add typed human-operation tools for safe ops: `multiloop_resume`, `multiloop_pause`, `multiloop_stop`, `multiloop_archive`.
-- [ ] Add LLM disambiguation handoff for parse failures after typed human-operation tools exist: provide registry snapshot and ask the model to call the right tool or ask the user to choose.
+- [x] Support lane-only `resume`, `pause`, `stop`, and `archive` when the target is unambiguous.
+- [x] Keep `rm` strict and destructive-safe: require exact `lane/run-tag`; if exposed as a tool later, require confirmation or leave slash-only.
+- [x] Add typed human-operation tools for safe ops: `multiloop_resume`, `multiloop_pause`, `multiloop_stop`, `multiloop_archive`.
+- [x] Add LLM disambiguation handoff for parse failures after typed human-operation tools exist: provide registry snapshot and ask the model to call the right tool or ask the user to choose.
 - [x] Add tests around guide seed prompt construction, target parsing, and list/status formatting helpers.
 
 ### Runtime hardening
