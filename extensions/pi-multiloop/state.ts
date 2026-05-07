@@ -11,16 +11,22 @@ export interface VerificationCheck {
   evidence?: string;
 }
 
+export type ResultAction = "keep" | "revert" | "log" | "skip";
+export type EscalationType = "refine" | "pivot" | "stop";
+
 export interface IterationResult {
   iteration: number;
   timestamp: string;
-  action: "keep" | "revert" | "log" | "skip";
+  action: ResultAction;
   metric?: number;
   baseline?: number;
   delta?: number;
   confidence?: "high" | "medium" | "low";
   hypothesis?: string;
   changes?: string;
+  reason?: string;
+  shouldEscalate?: boolean;
+  escalationType?: EscalationType;
   error?: string;
   measurements?: number[];
   checks?: VerificationCheck[];
@@ -137,29 +143,55 @@ export function reconstructState(cwd: string, id: LaneId): LoopState | null {
 
   const last = results[results.length - 1];
   state.iteration = last.iteration;
-  if (last.metric !== undefined) {
-    state.currentMetric = last.metric;
-  }
   if (state.activeIteration && state.activeIteration.iteration <= state.iteration) {
     delete state.activeIteration;
   }
 
+  let currentMetric = state.baseline ?? state.currentMetric;
+  let bestMetric = state.baseline ?? state.bestMetric;
   let consecutiveFailures = 0;
-  for (let i = results.length - 1; i >= 0; i--) {
-    if (results[i].action === "revert") {
+  let replayedPivotCount = 0;
+  let sawEscalationMetadata = false;
+
+  for (const result of results) {
+    if (result.escalationType) {
+      sawEscalationMetadata = true;
+    }
+
+    if (result.action === "keep") {
+      consecutiveFailures = 0;
+      if (result.metric !== undefined) {
+        currentMetric = result.metric;
+        bestMetric = bestMetric === null
+          ? result.metric
+          : state.metricDirection === "lower"
+            ? Math.min(bestMetric, result.metric)
+            : Math.max(bestMetric, result.metric);
+      }
+      continue;
+    }
+
+    if (result.action === "revert") {
       consecutiveFailures++;
-    } else if (results[i].action === "keep") {
-      break;
+      if (result.escalationType === "pivot") {
+        replayedPivotCount++;
+        consecutiveFailures = 0;
+      } else if (result.escalationType === "stop") {
+        state.status = "stopped";
+      }
+      continue;
+    }
+
+    if (result.action === "log" && result.metric !== undefined) {
+      currentMetric = result.metric;
     }
   }
-  state.consecutiveFailures = consecutiveFailures;
 
-  const kept = results.filter((r) => r.action === "keep" && r.metric !== undefined);
-  if (kept.length > 0) {
-    const best = state.metricDirection === "lower"
-      ? Math.min(...kept.map((r) => r.metric!))
-      : Math.max(...kept.map((r) => r.metric!));
-    state.bestMetric = best;
+  state.currentMetric = currentMetric;
+  state.bestMetric = bestMetric;
+  state.consecutiveFailures = consecutiveFailures;
+  if (sawEscalationMetadata) {
+    state.pivotCount = Math.max(state.pivotCount, replayedPivotCount);
   }
 
   return state;

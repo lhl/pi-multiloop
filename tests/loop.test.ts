@@ -268,6 +268,11 @@ describe("applyDecision", () => {
     expect(result.consecutiveFailures).toBe(0);
     expect(result.pivotCount).toBe(1);
 
+    const rows = readResults(cwd, id);
+    expect(rows[0].shouldEscalate).toBe(true);
+    expect(rows[0].escalationType).toBe("pivot");
+    expect(rows[0].reason).toBe("No improvement");
+
     // Verify lesson was written
     const lessonsFile = join(cwd, ".multiloop", "active", "test", "run-001", "lessons.md");
     expect(existsSync(lessonsFile)).toBe(true);

@@ -154,6 +154,7 @@ describe("state reconstruction", () => {
     });
     state.baseline = 100;
     state.currentMetric = 100;
+    state.bestMetric = 100;
     saveState(cwd, id, state);
 
     appendResult(cwd, id, {
@@ -178,8 +179,72 @@ describe("state reconstruction", () => {
     const reconstructed = reconstructState(cwd, id);
     expect(reconstructed).not.toBeNull();
     expect(reconstructed!.iteration).toBe(3);
+    expect(reconstructed!.currentMetric).toBe(90);
     expect(reconstructed!.consecutiveFailures).toBe(2);
     expect(reconstructed!.bestMetric).toBe(90);
+  });
+
+  it("does not let reverted measurements become the current metric", () => {
+    const state = createInitialState(id, "optimize", "echo 42", {
+      metricDirection: "lower",
+    });
+    state.baseline = 100;
+    state.currentMetric = 100;
+    state.bestMetric = 100;
+    saveState(cwd, id, state);
+
+    appendResult(cwd, id, {
+      iteration: 1,
+      timestamp: new Date().toISOString(),
+      action: "keep",
+      metric: 90,
+    });
+    appendResult(cwd, id, {
+      iteration: 2,
+      timestamp: new Date().toISOString(),
+      action: "revert",
+      metric: 120,
+    });
+
+    const reconstructed = reconstructState(cwd, id);
+
+    expect(reconstructed!.currentMetric).toBe(90);
+    expect(reconstructed!.bestMetric).toBe(90);
+    expect(reconstructed!.consecutiveFailures).toBe(1);
+  });
+
+  it("reconstructs pivot escalation resets from result metadata", () => {
+    const state = createInitialState(id, "optimize", "echo 42", {
+      metricDirection: "lower",
+    });
+    state.baseline = 100;
+    state.currentMetric = 100;
+    state.bestMetric = 100;
+    state.pivotCount = 0;
+    saveState(cwd, id, state);
+
+    for (let iteration = 1; iteration <= 4; iteration++) {
+      appendResult(cwd, id, {
+        iteration,
+        timestamp: new Date().toISOString(),
+        action: "revert",
+        metric: 101 + iteration,
+      });
+    }
+    appendResult(cwd, id, {
+      iteration: 5,
+      timestamp: new Date().toISOString(),
+      action: "revert",
+      metric: 110,
+      shouldEscalate: true,
+      escalationType: "pivot",
+    });
+
+    const reconstructed = reconstructState(cwd, id);
+
+    expect(reconstructed!.pivotCount).toBe(1);
+    expect(reconstructed!.consecutiveFailures).toBe(0);
+    expect(reconstructed!.currentMetric).toBe(100);
   });
 
   it("returns null when no state exists", () => {
