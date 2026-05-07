@@ -247,6 +247,31 @@ describe("state reconstruction", () => {
     expect(reconstructed!.currentMetric).toBe(100);
   });
 
+  it("handles older snapshots without pivotCount when replaying escalation metadata", () => {
+    const state = createInitialState(id, "optimize", "echo 42", {
+      metricDirection: "lower",
+    });
+    state.baseline = 100;
+    state.currentMetric = 100;
+    state.bestMetric = 100;
+    delete (state as { pivotCount?: number }).pivotCount;
+    saveState(cwd, id, state);
+
+    appendResult(cwd, id, {
+      iteration: 1,
+      timestamp: new Date().toISOString(),
+      action: "revert",
+      metric: 110,
+      shouldEscalate: true,
+      escalationType: "pivot",
+    });
+
+    const reconstructed = reconstructState(cwd, id);
+
+    expect(reconstructed!.pivotCount).toBe(1);
+    expect(reconstructed!.consecutiveFailures).toBe(0);
+  });
+
   it("returns null when no state exists", () => {
     expect(reconstructState(cwd, id)).toBeNull();
   });

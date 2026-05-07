@@ -191,7 +191,7 @@ export function reconstructState(cwd: string, id: LaneId): LoopState | null {
   state.bestMetric = bestMetric;
   state.consecutiveFailures = consecutiveFailures;
   if (sawEscalationMetadata) {
-    state.pivotCount = Math.max(state.pivotCount, replayedPivotCount);
+    state.pivotCount = Math.max(state.pivotCount ?? 0, replayedPivotCount);
   }
 
   return state;
