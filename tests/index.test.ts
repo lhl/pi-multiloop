@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildAutoContinuePrompt, buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsNotice, buildSetupGuidePrompt, colorizeResumableLoopsNotice, decideCompactionResumeTiming } from "../extensions/pi-multiloop/index.js";
+import { buildAutoContinuePrompt, buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsNotice, buildSetupGuidePrompt, colorizeResumableLoopsNotice, decideCompactionResumeTiming, formatLoopList, formatLoopStatusOverview } from "../extensions/pi-multiloop/index.js";
 import { createInitialState } from "../extensions/pi-multiloop/state.js";
+import type { RegistryEntry } from "../extensions/pi-multiloop/lanes.js";
 
 function activeState() {
   const state = createInitialState(
@@ -139,6 +140,72 @@ describe("buildSetupGuidePrompt", () => {
     expect(prompt).toContain("metric improves and every check passes");
     expect(prompt).toContain("call multiloop_start");
     expect(prompt).toContain("Reply go to start");
+  });
+
+  it("includes a freeform goal seed when provided", () => {
+    const prompt = buildSetupGuidePrompt("finish docs/TODO.md safely");
+
+    expect(prompt).toContain("User goal seed: finish docs/TODO.md safely");
+    expect(prompt).toContain("Scan the repo before proposing a loop");
+  });
+});
+
+function entry(overrides: Partial<RegistryEntry>): RegistryEntry {
+  return {
+    lane: "perf",
+    runTag: "run-001",
+    mode: "optimize",
+    status: "active",
+    startedAt: "2026-05-01T00:00:00.000Z",
+    stateDir: ".multiloop/active/perf/run-001",
+    ...overrides,
+  };
+}
+
+describe("formatLoopList", () => {
+  it("groups reverse-chronological loops and hides archived by default", () => {
+    const output = formatLoopList("/tmp", [
+      entry({ lane: "old", runTag: "run-001", status: "completed", startedAt: "2026-05-01T00:00:00.000Z" }),
+      entry({ lane: "new", runTag: "run-002", status: "active", startedAt: "2026-05-03T00:00:00.000Z" }),
+      entry({ lane: "paused", runTag: "run-003", status: "paused", startedAt: "2026-05-02T00:00:00.000Z" }),
+      entry({ lane: "arch", runTag: "run-004", status: "archived", startedAt: "2026-05-04T00:00:00.000Z" }),
+    ]);
+
+    expect(output).toContain("Active / resumable:");
+    expect(output).toContain("Paused:");
+    expect(output).toContain("Completed / stopped:");
+    expect(output).not.toContain("Archived:\n");
+    expect(output).toContain("1 archived loop is hidden");
+    expect(output.indexOf("new/run-002")).toBeLessThan(output.indexOf("paused/run-003"));
+  });
+
+  it("includes archived loops when requested", () => {
+    const output = formatLoopList("/tmp", [
+      entry({ lane: "arch", runTag: "run-004", status: "archived", startedAt: "2026-05-04T00:00:00.000Z" }),
+    ], { includeArchived: true });
+
+    expect(output).toContain("Archived:");
+    expect(output).toContain("arch/run-004");
+  });
+});
+
+describe("formatLoopStatusOverview", () => {
+  it("shows attached, detached, inactive, and archived buckets", () => {
+    const state = activeState();
+    const output = formatLoopStatusOverview("/tmp", [
+      entry({ lane: "perf", runTag: "run-001", status: "active" }),
+      entry({ lane: "detached", runTag: "run-002", status: "active" }),
+      entry({ lane: "paused", runTag: "run-003", status: "paused" }),
+      entry({ lane: "arch", runTag: "run-004", status: "archived" }),
+    ], [state]);
+
+    expect(output).toContain("Attached running loops:");
+    expect(output).toContain("perf/run-001");
+    expect(output).toContain("Detached resumable loops:");
+    expect(output).toContain("detached/run-002");
+    expect(output).toContain("Inactive/history:");
+    expect(output).toContain("paused/run-003");
+    expect(output).toContain("Archived: 1 run hidden");
   });
 });
 

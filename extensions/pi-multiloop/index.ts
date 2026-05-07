@@ -38,7 +38,7 @@ import {
   buildIterationContext,
   buildEscalationPrompt,
 } from "./loop.js";
-import { MODES, detectMode, type LoopMode } from "./modes.js";
+import { MODES, type LoopMode } from "./modes.js";
 import {
   assessAcceptance,
   ensureRequiredChecks,
@@ -256,9 +256,10 @@ export function buildAutoContinuePrompt(states: LoopState[]): string {
   ].join("\n");
 }
 
-export function buildSetupGuidePrompt(): string {
+export function buildSetupGuidePrompt(goalSeed?: string): string {
   return [
     "Help me create a high-quality pi-multiloop run.",
+    goalSeed?.trim() ? `User goal seed: ${goalSeed.trim()}` : undefined,
     "",
     "Use the loop setup guide contract:",
     "1. Scan the repo before proposing a loop: inspect the directory structure and relevant manifests/scripts/configs. Do not edit files during setup.",
@@ -282,7 +283,7 @@ export function buildSetupGuidePrompt(): string {
     "",
     "**Next step**",
     "- Reply go to start, or tell me what to change.",
-  ].join("\n");
+  ].filter((line): line is string => line !== undefined).join("\n");
 }
 
 function loopSummary(cwd: string, entry: RegistryEntry): string {
@@ -304,6 +305,101 @@ function loopSummary(cwd: string, entry: RegistryEntry): string {
   parts.push(`(${details.join(", ")})`);
 
   return parts.join(" — ");
+}
+
+function sortedLoops(loops: RegistryEntry[]): RegistryEntry[] {
+  return [...loops].sort((a, b) => {
+    const bTime = Date.parse(b.startedAt) || 0;
+    const aTime = Date.parse(a.startedAt) || 0;
+    if (bTime !== aTime) return bTime - aTime;
+    return `${a.lane}/${a.runTag}`.localeCompare(`${b.lane}/${b.runTag}`);
+  });
+}
+
+function formatLoopLine(cwd: string, loop: RegistryEntry, prefix = "  - "): string {
+  return `${prefix}${loopSummary(cwd, loop)} [${loop.status}]`;
+}
+
+export function formatLoopList(
+  cwd: string,
+  loops: RegistryEntry[],
+  options: { includeArchived?: boolean } = {}
+): string {
+  const includeArchived = options.includeArchived ?? false;
+  const visible = sortedLoops(loops).filter((loop) => includeArchived || loop.status !== "archived");
+  const archivedHidden = includeArchived ? 0 : loops.filter((loop) => loop.status === "archived").length;
+
+  if (visible.length === 0) {
+    return archivedHidden > 0
+      ? `No non-archived loops. ${archivedHidden} archived loop${archivedHidden === 1 ? " is" : "s are"} hidden; run /multiloop ls --archived to include archived runs.`
+      : "No loops registered.";
+  }
+
+  const order: RegistryEntry["status"][] = ["active", "paused", "completed", "archived"];
+  const titles: Record<RegistryEntry["status"], string> = {
+    active: "Active / resumable",
+    paused: "Paused",
+    completed: "Completed / stopped",
+    archived: "Archived",
+  };
+  const lines: string[] = [];
+
+  for (const status of order) {
+    const group = visible.filter((loop) => loop.status === status);
+    if (group.length === 0) continue;
+    if (lines.length > 0) lines.push("");
+    lines.push(`${titles[status]}:`);
+    lines.push(...group.map((loop) => formatLoopLine(cwd, loop)));
+  }
+
+  if (archivedHidden > 0) {
+    lines.push("", `${archivedHidden} archived loop${archivedHidden === 1 ? " is" : "s are"} hidden; run /multiloop ls --archived to include archived runs.`);
+  }
+
+  return lines.join("\n");
+}
+
+export function formatLoopStatusOverview(
+  cwd: string,
+  loops: RegistryEntry[],
+  states: LoopState[]
+): string {
+  const attachedKeys = new Set(states.map((state) => `${state.lane}/${state.runTag}`));
+  const attachedRunning = states.filter((state) => state.status === "running");
+  const detachedResumable = sortedLoops(loops).filter(
+    (loop) => loop.status === "active" && !attachedKeys.has(`${loop.lane}/${loop.runTag}`)
+  );
+  const inactive = sortedLoops(loops).filter((loop) => loop.status === "paused" || loop.status === "completed");
+  const archivedCount = loops.filter((loop) => loop.status === "archived").length;
+  const lines: string[] = ["pi-multiloop status"];
+
+  if (attachedRunning.length > 0) {
+    lines.push("", "Attached running loops:");
+    for (const state of attachedRunning) {
+      lines.push(`  - ${state.lane}/${state.runTag} (${state.mode}, ${state.iteration} iter)`);
+      if (state.goal) lines.push(`    ${truncateDisplay(state.goal, 80)}`);
+    }
+  }
+
+  if (detachedResumable.length > 0) {
+    lines.push("", "Detached resumable loops:");
+    lines.push(...detachedResumable.map((loop) => formatLoopLine(cwd, loop)));
+  }
+
+  if (inactive.length > 0) {
+    lines.push("", "Inactive/history:");
+    lines.push(...inactive.map((loop) => formatLoopLine(cwd, loop)));
+  }
+
+  if (archivedCount > 0) {
+    lines.push("", `Archived: ${archivedCount} run${archivedCount === 1 ? "" : "s"} hidden from the default view; run /multiloop ls --archived.`);
+  }
+
+  if (lines.length === 1) {
+    lines.push("", "No existing multiloop state. Run /multiloop guide to create one.");
+  }
+
+  return lines.join("\n");
 }
 
 interface ResumableLoopsNoticeStyle {
@@ -336,14 +432,6 @@ function styleText(
 function truncateDisplay(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   return text.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
-}
-
-function extractQuotedOption(input: string, labels: string[]): string | undefined {
-  const alternation = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  const backtick = input.match(new RegExp(`(?:${alternation})[:\\s]+\\\`([^\\\`]+)\\\``, "i"));
-  if (backtick) return backtick[1];
-  const quoted = input.match(new RegExp(`(?:${alternation})[:\\s]+"([^"]+)"`, "i"));
-  return quoted?.[1];
 }
 
 function themeFg(theme: ResumableLoopsNoticeTheme, name: string, text: string): string {
@@ -1101,36 +1189,26 @@ export default function (pi: ExtensionAPI) {
   });
 
   function showStatus(ctx: ExtensionCommandContext) {
-    if (activeStates.size === 0) {
-      const registry = readRegistry(ctx.cwd);
-      if (registry.loops.length === 0) {
-        pi.sendMessage({
-          customType: "multiloop-status",
-          content: "No active loops.",
-          display: true,
-        });
-      } else {
-        const lines = registry.loops.map(
-          (l) => `  ${loopSummary(ctx.cwd, l)} [${l.status}]`
-        );
-        pi.sendMessage({
-          customType: "multiloop-status",
-          content: `No active loops. Registry has ${registry.loops.length} entries:\n${lines.join("\n")}`,
-          display: true,
-        });
+    const running = runningStates();
+    if (running.length > 0) {
+      const lines: string[] = [];
+      for (const state of running) {
+        lines.push(buildIterationContext(state));
+        lines.push("");
       }
+
+      pi.sendMessage({
+        customType: "multiloop-status",
+        content: lines.join("\n"),
+        display: true,
+      });
       return;
     }
 
-    const lines: string[] = [];
-    for (const state of activeStates.values()) {
-      lines.push(buildIterationContext(state));
-      lines.push("");
-    }
-
+    const registry = readRegistry(ctx.cwd);
     pi.sendMessage({
       customType: "multiloop-status",
-      content: lines.join("\n"),
+      content: formatLoopStatusOverview(ctx.cwd, registry.loops, Array.from(activeStates.values())),
       display: true,
     });
   }
@@ -1322,19 +1400,12 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      if (trimmed === "list" || trimmed === "ls") {
+      if (trimmed === "list" || trimmed === "ls" || trimmed === "list --archived" || trimmed === "ls --archived") {
         const registry = readRegistry(ctx.cwd);
-        if (registry.loops.length === 0) {
-          ctx.ui.notify("No loops registered.", "info");
-          return;
-        }
-        const lines = registry.loops.map(
-          (l) =>
-            `${l.status === "active" ? "*" : " "} ${loopSummary(ctx.cwd, l)} [${l.status}]`
-        );
+        const includeArchived = trimmed.endsWith("--archived");
         pi.sendMessage({
           customType: "multiloop-list",
-          content: lines.join("\n"),
+          content: formatLoopList(ctx.cwd, registry.loops, { includeArchived }),
           display: true,
         });
         return;
@@ -1371,7 +1442,21 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      if (!trimmed || trimmed === "guide" || trimmed === "wizard" || trimmed === "setup") {
+      if (!trimmed) {
+        const registry = readRegistry(ctx.cwd);
+        if (activeStates.size > 0 || registry.loops.length > 0) {
+          pi.sendMessage({
+            customType: "multiloop-status",
+            content: formatLoopStatusOverview(ctx.cwd, registry.loops, Array.from(activeStates.values())),
+            display: true,
+          });
+        } else {
+          pi.sendUserMessage(buildSetupGuidePrompt(), { deliverAs: "followUp" });
+        }
+        return;
+      }
+
+      if (trimmed === "guide" || trimmed === "wizard" || trimmed === "setup") {
         pi.sendUserMessage(buildSetupGuidePrompt(), { deliverAs: "followUp" });
         return;
       }
@@ -1411,34 +1496,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const mode = detectMode(trimmed);
-      const laneParts = trimmed.match(/lane[:\s]+(\w+)/i);
-      const lane = laneParts?.[1] ?? mode;
-      const verifyCommand = extractQuotedOption(trimmed, ["verify"]) ?? "echo 'TODO: set verify command'";
-      const guardCommand = extractQuotedOption(trimmed, ["guard", "correctness", "correctness command"]);
-      const promptVerifier = extractQuotedOption(trimmed, [
-        "prompt verifier",
-        "prompt-verifier",
-        "verifier prompt",
-        "prompt check",
-        "prompt-check",
-        "correctness prompt",
-      ]);
-      const acceptancePolicy = extractQuotedOption(trimmed, ["acceptance", "acceptance policy", "accept"]);
-
-      const state = startLoop(ctx, {
-        lane,
-        mode,
-        goal: trimmed,
-        verifyCommand,
-        guardCommand,
-        promptVerifier,
-        acceptancePolicy,
-        metricDirection: MODES[mode].defaultDirection,
-      });
-
-      markLoopTurn("start");
-      pi.sendUserMessage(buildLoopStartPrompt(state), { deliverAs: "steer" });
+      pi.sendUserMessage(buildSetupGuidePrompt(trimmed), { deliverAs: "followUp" });
     },
   });
 

@@ -23,16 +23,16 @@ Keep tasks bite-sized and commit each logical unit separately.
 
 ### Command and setup UX
 
-- [ ] Make bare `/multiloop` status-first: show attached running loops, detached resumable loops, and inactive/history buckets; launch the setup guide only when there is no useful existing loop state.
-- [ ] Rework `/multiloop ls` to sort reverse-chronologically, group by status, and collapse archived runs unless `--archived` is passed.
-- [ ] Route every freeform `/multiloop <text>` input through the setup guide with the text as the goal seed.
-- [ ] Delete the inline regex start parser after freeform-to-guide routing lands; do not spend effort polishing a parser we plan to remove.
-- [ ] Add a pure target resolver for command arguments and tests for it: exact `lane/run-tag`, lane-only, empty input, unknown input, and ambiguous lane matches.
+- [x] Make bare `/multiloop` status-first: show attached running loops, detached resumable loops, and inactive/history buckets; launch the setup guide only when there is no useful existing loop state.
+- [x] Rework `/multiloop ls` to sort reverse-chronologically, group by status, and collapse archived runs unless `--archived` is passed.
+- [x] Route every freeform `/multiloop <text>` input through the setup guide with the text as the goal seed.
+- [x] Delete the inline regex start parser after freeform-to-guide routing lands; do not spend effort polishing a parser we plan to remove.
+- [x] Add a pure target resolver for command arguments and tests for it: exact `lane/run-tag`, lane-only, empty input, unknown input, and ambiguous lane matches.
 - [ ] Support lane-only `resume`, `pause`, `stop`, and `archive` when the target is unambiguous.
 - [ ] Keep `rm` strict and destructive-safe: require exact `lane/run-tag`; if exposed as a tool later, require confirmation or leave slash-only.
 - [ ] Add typed human-operation tools for safe ops: `multiloop_resume`, `multiloop_pause`, `multiloop_stop`, `multiloop_archive`.
 - [ ] Add LLM disambiguation handoff for parse failures after typed human-operation tools exist: provide registry snapshot and ask the model to call the right tool or ask the user to choose.
-- [ ] Add tests around guide seed prompt construction, target parsing, and list/status formatting helpers.
+- [x] Add tests around guide seed prompt construction, target parsing, and list/status formatting helpers.
 
 ### Runtime hardening
 
