@@ -36,7 +36,7 @@ Keep tasks bite-sized and commit each logical unit separately.
 
 ### Runtime hardening
 
-- [ ] Make `saveState` atomic: write temp file in the lane dir, fsync, then rename over `state.json`.
+- [x] Make `saveState` atomic: write temp file in the lane dir, fsync, then rename over `state.json`.
 - [ ] Define the expanded result-action vocabulary before adding counters: existing `keep`, `revert`, `log`, `skip`, plus new `crash` and `blocked` actions.
 - [ ] Add snapshot counters after action vocabulary is settled: `keeps`, `reverts`, `logs`, `crashes`, `blocked`, `lastAction`, `lastActionAt`.
 - [ ] Surface counters in `/multiloop status` and list/status helper tests.

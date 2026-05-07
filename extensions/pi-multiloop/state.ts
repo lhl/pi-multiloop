@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, appendFileSync, existsSync, openSync, closeSync, fsyncSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { type LaneId, laneDir, ensureLaneDir } from "./lanes.js";
 
@@ -118,9 +118,34 @@ export function readResultsSince(
 }
 
 export function saveState(cwd: string, id: LaneId, state: LoopState): void {
-  ensureLaneDir(cwd, id);
+  const dir = ensureLaneDir(cwd, id);
   state.lastUpdated = new Date().toISOString();
-  writeFileSync(statePath(cwd, id), JSON.stringify(state, null, 2) + "\n");
+
+  const finalPath = statePath(cwd, id);
+  const tmpPath = join(dir, `.state.json.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
+  const data = JSON.stringify(state, null, 2) + "\n";
+  let fileFd: number | undefined;
+  let dirFd: number | undefined;
+
+  try {
+    fileFd = openSync(tmpPath, "w");
+    writeFileSync(fileFd, data);
+    fsyncSync(fileFd);
+    closeSync(fileFd);
+    fileFd = undefined;
+
+    renameSync(tmpPath, finalPath);
+
+    dirFd = openSync(dir, "r");
+    fsyncSync(dirFd);
+    closeSync(dirFd);
+    dirFd = undefined;
+  } catch (err) {
+    if (fileFd !== undefined) closeSync(fileFd);
+    if (dirFd !== undefined) closeSync(dirFd);
+    rmSync(tmpPath, { force: true });
+    throw err;
+  }
 }
 
 export function loadState(cwd: string, id: LaneId): LoopState | null {

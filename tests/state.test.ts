@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -83,6 +83,20 @@ describe("state snapshot", () => {
     expect(loaded!.lane).toBe("test");
     expect(loaded!.mode).toBe("optimize");
     expect(loaded!.goal).toBe("reduce latency");
+  });
+
+  it("saves state through a temp file without leaving temp artifacts", () => {
+    const state = createInitialState(id, "optimize", "echo 42");
+
+    saveState(cwd, id, state);
+    state.iteration = 2;
+    saveState(cwd, id, state);
+
+    const loaded = loadState(cwd, id);
+    const files = readdirSync(join(cwd, ".multiloop", "active", id.lane, id.runTag));
+    expect(loaded!.iteration).toBe(2);
+    expect(files).toContain("state.json");
+    expect(files.some((file) => file.endsWith(".tmp"))).toBe(false);
   });
 
   it("returns null when no state file exists", () => {
