@@ -801,7 +801,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "multiloop_start",
     label: "Multiloop Start",
-    description: "Start a new pi-multiloop after the setup guide has scanned the repo, asked clarifying questions, and received explicit user approval.",
+    description: "Phase 0 / launch: start a new pi-multiloop only after the setup guide has scanned the repo, asked clarifying questions, and received explicit user approval.",
     parameters: StartParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       markLoopTurn("multiloop_start");
@@ -820,7 +820,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "multiloop_iterate",
     label: "Multiloop Iterate",
-    description: "Signal the start of a new loop iteration. Call this before making changes.",
+    description: "Phase 1 / iterate: signal the start of one focused loop iteration. Call before making changes; after changes, run verify/guards and call multiloop_measure.",
     parameters: IterateParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       markLoopTurn("multiloop_iterate");
@@ -912,7 +912,7 @@ export default function (pi: ExtensionAPI) {
     name: "multiloop_measure",
     label: "Multiloop Measure",
     description:
-      "Record metric measurements and optional mechanical/prompt verification checks from the verify contract. Pass multiple measurements for statistical confidence.",
+      "Phase 2 / measure: record metric measurements and required mechanical/prompt check verdicts after running verify/guards. Then call multiloop_decide or multiloop_log.",
     parameters: MeasureParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       markLoopTurn("multiloop_measure");
@@ -1023,7 +1023,7 @@ export default function (pi: ExtensionAPI) {
     name: "multiloop_decide",
     label: "Multiloop Decide",
     description:
-      "Record the required keep/revert/log decision for the current measured iteration. Updates state and logs the result.",
+      "Phase 3 / decide: finish the current measured keep/revert iteration with the recorded measurements. Required after multiloop_measure for optimize-style loops.",
     parameters: DecideParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       markLoopTurn("multiloop_decide");
@@ -1171,7 +1171,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "multiloop_log",
     label: "Multiloop Log",
-    description: "Log an iteration result without keep/revert semantics. For research and dev modes.",
+    description: "Phase 3 / log: finish a research/dev/punchlist iteration without keep/revert semantics, or record skip/crash/blocked after measurement/work.",
     parameters: LogParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       markLoopTurn("multiloop_log");

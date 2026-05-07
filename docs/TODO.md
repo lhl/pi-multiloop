@@ -43,7 +43,7 @@ Keep tasks bite-sized and commit each logical unit separately.
 - [ ] Add a runtime-refusal reference section: measurement mismatch, missing configured guard/prompt verifier, no active loop, measured-but-not-decided iteration, stopped loop, and escalation exhaustion; include trigger, reason, and recovery for each.
 - [ ] Decide whether `multiloop_measure` should ever execute configured guard commands itself or keep requiring agent-supplied check verdicts; preserve the north star that pi-multiloop should not become the benchmark/test runner.
 - [ ] Align or prominently document status vocabulary (`state.status: running/stopped` vs `registry.status: active/completed`).
-- [ ] Add phase hints to tool descriptions so the tool list itself explains when to call iterate, measure, decide/log, and start.
+- [x] Add phase hints to tool descriptions so the tool list itself explains when to call iterate, measure, decide/log, and start.
 
 ### Publish gate
 
