@@ -88,3 +88,16 @@ Keep tasks bite-sized and commit each logical unit separately.
 - [~] Web-search escalation rung after pivot exhaustion — deferred to preserve local/repo-first behavior and avoid introducing web dependency into the core loop.
 - [~] CI / trusted npm publishing — deferred; local `tsc`, `vitest`, and `pi install .` smoke pass for 0.3.0, but CI credentials/publishing policy are outside this code pass.
 - [x] Lane-level `.gitignore` hint for `.multiloop/`.
+
+### Feedback reconciliation follow-ups
+
+These are smaller `docs/FEEDBACK.md` observations that were not part of the 0.3.0 publish gate.
+
+- [ ] Add command-handler coverage for `/multiloop` dispatch itself, not only pure helpers: status/ls, guide aliases, resume/pause/stop/archive target resolution, rm strictness, and freeform goal seeding.
+- [ ] Decide whether to add friendlier run selectors such as short IDs or `lane@N` so users do not have to retype full `run-YYYYMMDD-HHMMSS` tags.
+- [ ] List `wizard` and `setup` aliases in `/multiloop help`, or remove the aliases if `guide` should be the only documented path.
+- [ ] Rename internal `runningStates()` to `attachedRunningStates()` or equivalent so readers do not confuse attached/running with "agent is currently iterating".
+- [ ] Decide auto-continue policy for ambiguous user suspensions such as "wait" / "hold on" / "let me think": widen the regex or document that explicit `/multiloop pause` is required.
+- [ ] Add a short `AGENTS.md` note that `CLAUDE.md` is a compatibility symlink and `AGENTS.md` is canonical.
+- [~] Add a typed `multiloop_rm` tool only if destructive confirmation is available — deferred because `rm` is intentionally slash-only and exact `lane/run-tag` for safety.
+- [~] Add automated punchlist convergence stopping only if the progress metric plus setup-guide stop condition proves insufficient — deferred because 0.3.0 documents punchlist as agent-driven progress/log acceptance.

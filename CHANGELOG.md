@@ -18,6 +18,7 @@ _No unreleased changes._
 - Default punchlist, research, and dev loops to log/progress acceptance; optimize loops continue to use keep/revert acceptance by default.
 - Make `state.json` writes atomic via temp-file write, fsync, and rename.
 - Document runtime refusal/recovery behavior, status vocabulary, guard execution policy, and the canonical setup contract.
+- Clarify README state/lifecycle docs for status-first bare `/multiloop` behavior and reconcile remaining feedback follow-ups in `docs/TODO.md`.
 
 ### Fixed
 - Require `multiloop_decide` measurements to match the last recorded `multiloop_measure`, preventing unrecorded or stale verification decisions.

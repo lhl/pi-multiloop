@@ -125,16 +125,16 @@ your-repo/
 | File | Written when | Contents |
 |---|---|---|
 | `registry.json` | Loop start/stop/archive | Index of all loops (lane, run-tag, mode, status, verify command). One file per repo. |
-| `state.json` | Every iteration + start/stop | Resume snapshot: iteration count, baseline, current/best metric, consecutive failures, pivot count, config, and any active measured-but-not-decided iteration. Overwritten each iteration. |
-| `results.jsonl` | Every iteration | Append-only log — one JSON line per iteration with: action (keep/revert/log), metric, baseline, delta, confidence, hypothesis, changes, measurements array, verification checks, and acceptance verdict. Never overwritten. |
+| `state.json` | Every iteration + start/stop | Atomic resume snapshot: iteration count, action counters, baseline, current/best metric, consecutive failures, pivot count, acceptance mode, config, and any active measured-but-not-decided iteration. |
+| `results.jsonl` | Every iteration | Append-only log — one JSON line per iteration with: action (keep/revert/log/skip/crash/blocked), metric, baseline, delta, confidence, hypothesis, changes, measurements array, verification checks, and acceptance verdict. Never overwritten. |
 | `lessons.md` | On pivot escalation | Freeform notes appended when the loop pivots strategy. Carried forward to bias future hypotheses. |
 
-For new loops, `/multiloop` (with no args) launches a setup guide. The guide scans the repo, asks at least one clarification round, proposes metric/verify/guard/checks, and starts via `multiloop_start` only after explicit approval.
+With existing loop state, bare `/multiloop` is status-first: it shows attached running loops, detached resumable loops, inactive/history buckets, and archived-run counts. If there is no useful existing state, bare `/multiloop` launches the setup guide. `/multiloop guide` always launches the guide explicitly. The guide scans the repo, asks at least one clarification round, proposes metric/verify/guard/checks, and starts via `multiloop_start` only after explicit approval.
 
 ### Lifecycle
 
-1. **`/multiloop`** — Creates `.multiloop/` (if absent) with `registry.json` and `active/<lane>/<run-tag>/state.json`.
-2. **Each iteration** — `multiloop_iterate` records an active iteration marker in `state.json`; `multiloop_measure` records pending measurements plus optional mechanical/prompt checks; `multiloop_decide`/`multiloop_log` appends to `results.jsonl`, clears the active marker, and overwrites `state.json`.
+1. **`/multiloop`** — Shows current loop state. If no useful state exists, launches the setup guide. A loop is created only after explicit approval and `multiloop_start`, which writes `.multiloop/registry.json` and `active/<lane>/<run-tag>/state.json`.
+2. **Each iteration** — `multiloop_iterate` records an active iteration marker in `state.json`; `multiloop_measure` records pending measurements plus optional mechanical/prompt checks; `multiloop_decide`/`multiloop_log` appends to `results.jsonl`, updates action counters, clears the active marker, and atomically replaces `state.json`.
 3. **`/multiloop stop`** — Updates status in both `state.json` and registry. Files stay on disk.
 4. **`/multiloop resume`** — Explicitly reconstructs in-memory state from `results.jsonl` + `state.json` and sends a loop-aware resume prompt. No new files until next iteration.
 5. **Auto-continuation during a current-session loop** — After a loop-owned turn ends, if the loop is still `running` and no user message is pending, pi-multiloop sends a follow-up prompt for the next required action. If a measurement is pending, the prompt forces decide/log before new work.
