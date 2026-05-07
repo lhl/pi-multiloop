@@ -15,6 +15,8 @@ export interface RegistryEntry {
   stateDir: string;
   verifyCommand?: string;
   guardCommand?: string;
+  promptVerifier?: string;
+  acceptancePolicy?: string;
   metric?: string;
 }
 

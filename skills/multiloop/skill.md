@@ -26,20 +26,22 @@ Analyze the user's goal to detect the appropriate mode:
 
 ## Setup Flow
 
-1. **Ask for the goal** (if not already stated): "What are you trying to accomplish?"
-2. **Detect mode** from the response and confirm: "This sounds like an [optimize/punchlist/research/dev] loop."
-3. **Ask for the verify command**: "What command measures your metric?" For punchlist mode, ask for the checklist file path.
-4. **Ask for the guard command** (optional): "Any command that must pass for changes to be valid? (e.g., `make test`)"
-5. **Ask for prompt verifier / acceptance criteria** (optional): "Any prompt-based correctness check or human-readable acceptance rule?" Use this when output correctness cannot be fully captured by a command.
-6. **Suggest a lane name** based on the goal (e.g., `perf`, `quant`, `plan`).
-7. **Ask for scope** (optional): "Any specific files or directories to focus on?"
-8. **Confirm and start**: Summarize the configuration, then use the `/multiloop` command with the parsed config.
+For new loops, use the setup-guide behavior exposed by `/multiloop` / `multiloop_start`:
+
+1. **Scan before asking**: inspect repo structure, manifests, scripts, tests, CI, and relevant checklist/plan files. Do not edit during setup.
+2. **Ask at least one repo-grounded clarification round**, even when the loop seems obvious. Propose concrete defaults.
+3. **Detect mode** and confirm: optimize, punchlist, research, or dev.
+4. **Confirm verify/metric**: what command emits the metric, what metric name, and whether lower/higher is better.
+5. **Confirm guard and prompt verifier**: include pass/fail guard commands and semantic correctness criteria when output correctness matters.
+6. **Suggest lane/scope/stop condition** based on the goal.
+7. **Present a concise confirmation summary** and wait for explicit `go` / `start` / `launch`.
+8. **Start with `multiloop_start`** using the confirmed config. Do not make the user hand-write JSON or field names.
 
 ## Runtime Hard Rules
 
-When a loop is active, treat every resume/start/auto-continue prompt as an action contract, not as a request for a status report.
+When a loop is active, status questions and side queries are allowed: answer them briefly, then continue the loop if state still says `running`.
 
-1. **Do not stop after one recorded decision.** If loop state remains `running`, continue into the next required action automatically unless the user pauses/stops it or a true blocker prevents safe work.
+1. **Do not stop after one recorded decision.** If loop state remains `running`, continue into the next required action automatically unless the user pauses/stops it or the loop state is no longer active.
 2. **A verification is not recorded just because a shell command printed a metric.** It counts only after `multiloop_measure` persists the measurement in `.multiloop/active/<lane>/<runTag>/state.json`.
 3. **Compound verifiers require both metric and checks.** For goals like "improve performance while output remains correct", pass prompt/mechanical verdicts to `multiloop_measure.checks`; keep is valid only when the metric improves and all checks pass. If a configured guard or prompt verifier was run, include its verdict; omitted configured verifiers are recorded as failed checks.
 4. **An iteration is not complete until `multiloop_decide` or `multiloop_log` appends `results.jsonl` and updates `state.json`.** Do not provide a final/status answer between measurement and decide/log.

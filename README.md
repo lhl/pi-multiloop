@@ -18,7 +18,7 @@ Other loop extensions only support one loop per session or worktree. If you're t
 - **Compound verifiers** — combine a metric with mechanical guards and prompt-based correctness checks; keep is recommended only when the metric improves and all checks pass
 - **Confidence scoring** — supports Median Absolute Deviation (MAD) to handle noisy benchmarks like GPU timing or training loss
 - **Durable history** — append-only JSONL per lane, survives context resets and restarts
-- **Mechanical continuation** — loop-owned turns automatically queue the next required action while the loop remains running, so agents do not stop after a single decide/log status report
+- **Mechanical continuation** — loop-owned turns automatically queue the next required action while the loop remains running, while still allowing brief answers to user status questions
 - **Compaction-aware resume** — when pi auto-compacts during a loop explicitly started or resumed in the current session, pi-multiloop injects a loop-aware resume prompt after the interrupted turn ends
 - **Escalation** — refines strategy automatically after consecutive failures
 - **TUI dashboard** — live status and metric history per lane
@@ -32,11 +32,13 @@ pi install npm:pi-multiloop
 ## Quick Start
 
 ```bash
-# Start an optimization loop
+# Launch the setup guide (recommended for new loops)
 /multiloop
-# Describe your goal: "improve inference latency"
-# Specify verify command: "./bench.py --quick"
-# Confirm and go
+# The guide scans the repo, proposes verify/guard/checks, asks for confirmation,
+# then starts the loop after you reply "go".
+
+# Or start directly with an inline config
+/multiloop improve inference latency, verify: `./bench.py --quick`
 
 # Start a compound verifier loop: metric + mechanical correctness + prompt review
 /multiloop improve latency while completing docs/TODO.md, verify: `./bench.py --json`, guard: `npm test`, prompt verifier: `Review the generated output against fixtures; pass only if semantics are unchanged.`
@@ -119,6 +121,8 @@ your-repo/
 | `state.json` | Every iteration + start/stop | Resume snapshot: iteration count, baseline, current/best metric, consecutive failures, pivot count, config, and any active measured-but-not-decided iteration. Overwritten each iteration. |
 | `results.jsonl` | Every iteration | Append-only log — one JSON line per iteration with: action (keep/revert/log), metric, baseline, delta, confidence, hypothesis, changes, measurements array, verification checks, and acceptance verdict. Never overwritten. |
 | `lessons.md` | On pivot escalation | Freeform notes appended when the loop pivots strategy. Carried forward to bias future hypotheses. |
+
+For new loops, `/multiloop` (with no args) launches a setup guide. The guide scans the repo, asks at least one clarification round, proposes metric/verify/guard/checks, and starts via `multiloop_start` only after explicit approval.
 
 ### Lifecycle
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAutoContinuePrompt, buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsNotice, colorizeResumableLoopsNotice, decideCompactionResumeTiming } from "../extensions/pi-multiloop/index.js";
+import { buildAutoContinuePrompt, buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsNotice, buildSetupGuidePrompt, colorizeResumableLoopsNotice, decideCompactionResumeTiming } from "../extensions/pi-multiloop/index.js";
 import { createInitialState } from "../extensions/pi-multiloop/state.js";
 
 function activeState() {
@@ -130,6 +130,18 @@ describe("buildExplicitResumePrompt", () => {
   });
 });
 
+describe("buildSetupGuidePrompt", () => {
+  it("asks the agent to scan, clarify, confirm, and start with multiloop_start", () => {
+    const prompt = buildSetupGuidePrompt();
+
+    expect(prompt).toContain("Scan the repo before proposing a loop");
+    expect(prompt).toContain("Ask at least one repo-grounded clarification round");
+    expect(prompt).toContain("metric improves and every check passes");
+    expect(prompt).toContain("call multiloop_start");
+    expect(prompt).toContain("Reply go to start");
+  });
+});
+
 describe("buildAutoContinuePrompt", () => {
   it("demands baseline measurement when no baseline is recorded", () => {
     const state = activeState();
@@ -140,7 +152,7 @@ describe("buildAutoContinuePrompt", () => {
     const prompt = buildAutoContinuePrompt([state]);
 
     expect(prompt).toContain("Continue active pi-multiloop work.");
-    expect(prompt).toContain("Do not answer with a status report");
+    expect(prompt).toContain("If the user asked a status question or other query, answer it first");
     expect(prompt).toContain("baseline is not recorded");
     expect(prompt).toContain("multiloop_measure");
   });
@@ -161,7 +173,7 @@ describe("buildAutoContinuePrompt", () => {
 
     expect(prompt).toContain("iteration 4 has measurements [356]");
     expect(prompt).toContain("multiloop_decide action=\"revert\"");
-    expect(prompt).toContain("before any status/final answer");
+    expect(prompt).toContain("if the user asked a question, answer it");
   });
 });
 

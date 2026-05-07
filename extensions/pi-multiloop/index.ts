@@ -38,7 +38,7 @@ import {
   buildIterationContext,
   buildEscalationPrompt,
 } from "./loop.js";
-import { MODES, detectMode } from "./modes.js";
+import { MODES, detectMode, type LoopMode } from "./modes.js";
 import {
   assessAcceptance,
   ensureRequiredChecks,
@@ -78,6 +78,18 @@ function sameMeasurements(a: number[] | undefined, b: number[]): boolean {
   return Array.isArray(a) && a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
+function shouldContinueAfterUserInput(text: string): boolean {
+  if (runningStates().length === 0) return false;
+  const lower = text.trim().toLowerCase();
+  if (!lower) return false;
+  if (lower.startsWith("/")) return false;
+
+  const asksToSuspend = /\b(stop|pause|halt|suspend|disable|archive|delete|remove)\b.*\b(loop|multiloop|iteration|work)\b/.test(lower) ||
+    /\b(loop|multiloop|iteration|work)\b.*\b(stop|pause|halt|suspend|disable|archive|delete|remove)\b/.test(lower) ||
+    /\b(do not|don't|dont)\s+continue\b/.test(lower);
+  return !asksToSuspend;
+}
+
 function activeIterationSummary(state: LoopState): string {
   if (state.baseline === null) {
     return `- ${state.lane}/${state.runTag}: baseline is not recorded. Run verify \`${state.verifyCommand}\`, then call multiloop_measure to persist the baseline.`;
@@ -100,7 +112,7 @@ function activeIterationSummary(state: LoopState): string {
   const acceptanceStatus = active.acceptancePassed === undefined
     ? "UNKNOWN"
     : active.acceptancePassed ? "PASS" : "FAIL";
-  return `- ${state.lane}/${state.runTag}: iteration ${active.iteration} has measurements [${active.measurements?.join(", ") ?? ""}] and acceptance ${acceptanceStatus}; complete it with multiloop_decide action="${active.recommendedAction ?? "log"}" before any status/final answer.`;
+  return `- ${state.lane}/${state.runTag}: iteration ${active.iteration} has measurements [${active.measurements?.join(", ") ?? ""}] and acceptance ${acceptanceStatus}; if the user asked a question, answer it, then complete the pending iteration with multiloop_decide action="${active.recommendedAction ?? "log"}".`;
 }
 
 export type CompactionResumeTiming = "skip" | "after-current-agent-end" | "after-compaction";
@@ -194,7 +206,7 @@ function buildLoopResumePrompt(
     compactionEntryId ? `Compaction entry: ${compactionEntryId}` : undefined,
     "",
     "Do not start a new loop and do not ask for confirmation. Resume from the persisted .multiloop state exactly where the loop left off.",
-    "This is an action contract, not a status request: do not provide a final/status answer while any listed loop remains running.",
+    "This is a continuation contract: answer any explicit user status/query briefly if needed, then resume loop work while any listed loop remains running.",
     "A verification is recorded only after multiloop_measure persists it; an iteration is complete only after multiloop_decide or multiloop_log updates state/results.",
     "",
     contexts,
@@ -205,7 +217,7 @@ function buildLoopResumePrompt(
     "- If an iteration was not in progress, call multiloop_iterate for the appropriate lane.",
     "- Run the loop's verify command, guard command if present, and prompt verifier if configured.",
     "- Record metric measurements and all mechanical/prompt check verdicts with multiloop_measure, then finish with multiloop_decide or multiloop_log.",
-    "- If the loop is still running after decide/log, continue into the next iteration instead of summarizing.",
+    "- If the loop is still running after decide/log, continue into the next iteration instead of ending with only a summary.",
     "- If state is ambiguous, inspect .multiloop/active/<lane>/<runTag>/state.json and results.jsonl before proceeding.",
   ].filter((line): line is string => line !== undefined).join("\n");
 }
@@ -231,16 +243,45 @@ export function buildAutoContinuePrompt(states: LoopState[]): string {
   return [
     "Continue active pi-multiloop work.",
     "",
-    "Hard contract:",
-    "- Do not answer with a status report while any listed loop remains running.",
-    "- Complete the next mechanical loop action: verify/guard/prompt verifier, multiloop_measure, then multiloop_decide or multiloop_log.",
+    "Continuation policy:",
+    "- If the user asked a status question or other query, answer it first.",
+    "- If the listed loop is still running after that answer, resume the next loop action; if it is stopped/paused, do not force more loop tools.",
+    "- Next loop action is usually: verify/guard/prompt verifier, multiloop_measure, then multiloop_decide or multiloop_log.",
     "- A bash verify output alone is not recorded; persist measurements and all mechanical/prompt check verdicts through multiloop_measure.",
-    "- After decide/log, continue into the next iteration unless the loop stops, is paused, or a true blocker prevents safe work.",
     "",
     contexts,
     "",
     "Required next action:",
     nextActions,
+  ].join("\n");
+}
+
+export function buildSetupGuidePrompt(): string {
+  return [
+    "Help me create a high-quality pi-multiloop run.",
+    "",
+    "Use the loop setup guide contract:",
+    "1. Scan the repo before proposing a loop: inspect the directory structure and relevant manifests/scripts/configs. Do not edit files during setup.",
+    "2. Ask at least one repo-grounded clarification round before launch, even if the request seems obvious. Prefer concrete defaults and multiple-choice questions.",
+    "3. Infer and confirm: goal, mode, lane, scope, metric name, metric direction, verify command, guard command, prompt verifier, acceptance policy, stop condition/iteration cap, and rollback safety.",
+    "4. For compound goals like performance improves while output remains correct, configure a metric verify command plus mechanical/prompt checks. Acceptance should be: metric improves and every check passes.",
+    "5. Present a short confirmation summary with concrete commands and current baseline plan. Do not start the loop until I explicitly reply go/start/launch.",
+    "6. After approval, call multiloop_start with the confirmed config. Do not ask another question after approval unless a true safety blocker appears.",
+    "",
+    "Confirmation format:",
+    "**Proposed loop**",
+    "- Target: ...",
+    "- Metric: ... (direction: lower/higher)",
+    "- Verify: `...`",
+    "- Guard/checks: `...` plus prompt verifier if needed",
+    "- Scope/lane: ...",
+    "- Stop condition: ...",
+    "",
+    "**Need to confirm**",
+    "- Only genuine blockers or choices.",
+    "",
+    "**Next step**",
+    "- Reply go to start, or tell me what to change.",
   ].join("\n");
 }
 
@@ -476,8 +517,12 @@ export default function (pi: ExtensionAPI) {
   pi.on("input", async (event) => {
     lastInputAt = Date.now();
     if (event.source !== "extension") {
-      loopTurnActive = false;
-      loopTurnReason = undefined;
+      if (shouldContinueAfterUserInput(event.text)) {
+        markLoopTurn("user-query");
+      } else {
+        loopTurnActive = false;
+        loopTurnReason = undefined;
+      }
     }
   });
 
@@ -544,6 +589,106 @@ export default function (pi: ExtensionAPI) {
     if (endedLoopTurn) {
       queueLoopAutoContinue(pi, ctx, endedLoopReason);
     }
+  });
+
+  interface StartLoopConfig {
+    lane: string;
+    runTag?: string;
+    mode: LoopMode;
+    goal: string;
+    verifyCommand: string;
+    guardCommand?: string;
+    promptVerifier?: string;
+    acceptancePolicy?: string;
+    metricName?: string;
+    metricDirection?: "lower" | "higher";
+    scope?: string;
+  }
+
+  function startLoop(ctx: ExtensionContext | ExtensionCommandContext, config: StartLoopConfig): LoopState {
+    const id: LaneId = { lane: config.lane, runTag: config.runTag ?? generateRunTag() };
+    const acceptancePolicy = config.acceptancePolicy
+      ?? (config.guardCommand || config.promptVerifier
+        ? "metric must improve and all mechanical/prompt verification checks must pass"
+        : undefined);
+    const state = createInitialState(id, config.mode, config.verifyCommand, {
+      guardCommand: config.guardCommand,
+      promptVerifier: config.promptVerifier,
+      acceptancePolicy,
+      metricName: config.metricName,
+      metricDirection: config.metricDirection ?? MODES[config.mode].defaultDirection,
+      scope: config.scope,
+      goal: config.goal,
+    });
+
+    ensureLaneDir(ctx.cwd, id);
+    saveState(ctx.cwd, id, state);
+
+    const entry: RegistryEntry = {
+      lane: id.lane,
+      runTag: id.runTag,
+      mode: config.mode,
+      status: "active",
+      startedAt: state.startedAt,
+      stateDir: `.multiloop/active/${id.lane}/${id.runTag}`,
+      verifyCommand: config.verifyCommand,
+      guardCommand: config.guardCommand,
+      promptVerifier: config.promptVerifier,
+      acceptancePolicy,
+      metric: config.metricName,
+    };
+    registerLoop(ctx.cwd, entry);
+
+    activeStates.set(stateKey(id), state);
+    updateStatus(ctx);
+    return state;
+  }
+
+  function buildLoopStartPrompt(state: LoopState): string {
+    return [
+      `New ${state.mode} loop started: ${formatLaneId({ lane: state.lane, runTag: state.runTag })}`,
+      `Verify: \`${state.verifyCommand}\``,
+      state.guardCommand ? `Guard: \`${state.guardCommand}\`` : null,
+      state.promptVerifier ? `Prompt verifier: ${state.promptVerifier}` : null,
+      state.acceptancePolicy ? `Acceptance: ${state.acceptancePolicy}` : null,
+      state.metricName ? `Metric: ${state.metricName} (${state.metricDirection})` : `Metric direction: ${state.metricDirection}`,
+      state.scope ? `Scope: ${state.scope}` : null,
+      `Goal: ${state.goal ?? ""}`,
+      "",
+      "Run the verify command to establish a baseline, call multiloop_measure to persist it, then keep iterating until the loop is stopped or paused.",
+      "If asked a status/query while this loop remains running, answer briefly, then continue verify → measure → decide/log in state/results.",
+    ].filter((line): line is string => line !== null).join("\n");
+  }
+
+  const StartParams = Type.Object({
+    lane: Type.String({ description: "Lane identifier for this loop" }),
+    mode: Type.Union([
+      Type.Literal("optimize"),
+      Type.Literal("punchlist"),
+      Type.Literal("research"),
+      Type.Literal("dev"),
+    ], { description: "Loop mode selected by the setup guide" }),
+    goal: Type.String({ description: "Confirmed user goal" }),
+    verifyCommand: Type.String({ description: "Command that produces the primary metric" }),
+    runTag: Type.Optional(Type.String({ description: "Run tag (auto-generated if omitted)" })),
+    guardCommand: Type.Optional(Type.String({ description: "Optional pass/fail guard command" })),
+    promptVerifier: Type.Optional(Type.String({ description: "Optional prompt-based correctness verifier / review criterion" })),
+    acceptancePolicy: Type.Optional(Type.String({ description: "Acceptance rule, e.g. metric improves and all checks pass" })),
+    metricName: Type.Optional(Type.String({ description: "Metric name" })),
+    metricDirection: Type.Optional(Type.Union([Type.Literal("lower"), Type.Literal("higher")], { description: "Whether lower or higher metric values are better" })),
+    scope: Type.Optional(Type.String({ description: "Files/directories in scope" })),
+  });
+
+  pi.registerTool({
+    name: "multiloop_start",
+    label: "Multiloop Start",
+    description: "Start a new pi-multiloop after the setup guide has scanned the repo, asked clarifying questions, and received explicit user approval.",
+    parameters: StartParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      markLoopTurn("multiloop_start");
+      const state = startLoop(ctx, params as StartLoopConfig);
+      return textResult(buildLoopStartPrompt(state));
+    },
   });
 
   const IterateParams = Type.Object({
@@ -1216,7 +1361,12 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      if (trimmed === "help" || !trimmed) {
+      if (!trimmed || trimmed === "guide" || trimmed === "wizard" || trimmed === "setup") {
+        pi.sendUserMessage(buildSetupGuidePrompt(), { deliverAs: "followUp" });
+        return;
+      }
+
+      if (trimmed === "help") {
         pi.sendMessage({
           customType: "multiloop-help",
           content: [
@@ -1233,6 +1383,7 @@ export default function (pi: ExtensionAPI) {
             "  ls               List all loops in registry",
             "  stop [lane]      Stop active loop(s)",
             "  pause [lane]     Pause active loop(s)",
+            "  guide            Launch the setup guide for a new high-quality loop",
             "  resume <id>      Resume a stopped/paused loop",
             "  archive [id]     Archive completed loops (all by default)",
             "  rm <id>          Delete a loop and its state files",
@@ -1251,11 +1402,8 @@ export default function (pi: ExtensionAPI) {
       }
 
       const mode = detectMode(trimmed);
-      const runTag = generateRunTag();
       const laneParts = trimmed.match(/lane[:\s]+(\w+)/i);
       const lane = laneParts?.[1] ?? mode;
-
-      const id: LaneId = { lane, runTag };
       const verifyCommand = extractQuotedOption(trimmed, ["verify"]) ?? "echo 'TODO: set verify command'";
       const guardCommand = extractQuotedOption(trimmed, ["guard", "correctness", "correctness command"]);
       const promptVerifier = extractQuotedOption(trimmed, [
@@ -1266,54 +1414,21 @@ export default function (pi: ExtensionAPI) {
         "prompt-check",
         "correctness prompt",
       ]);
-      const acceptancePolicy = extractQuotedOption(trimmed, ["acceptance", "acceptance policy", "accept"])
-        ?? (guardCommand || promptVerifier
-          ? "metric must improve and all mechanical/prompt verification checks must pass"
-          : undefined);
+      const acceptancePolicy = extractQuotedOption(trimmed, ["acceptance", "acceptance policy", "accept"]);
 
-      const state = createInitialState(id, mode, verifyCommand, {
+      const state = startLoop(ctx, {
+        lane,
+        mode,
+        goal: trimmed,
+        verifyCommand,
         guardCommand,
         promptVerifier,
         acceptancePolicy,
-        goal: trimmed,
         metricDirection: MODES[mode].defaultDirection,
       });
 
-      ensureLaneDir(ctx.cwd, id);
-      saveState(ctx.cwd, id, state);
-
-      const entry: RegistryEntry = {
-        lane: id.lane,
-        runTag: id.runTag,
-        mode,
-        status: "active",
-        startedAt: state.startedAt,
-        stateDir: `.multiloop/active/${id.lane}/${id.runTag}`,
-        verifyCommand,
-        guardCommand,
-      };
-      registerLoop(ctx.cwd, entry);
-
-      activeStates.set(stateKey(id), state);
-      updateStatus(ctx);
-
       markLoopTurn("start");
-      pi.sendUserMessage(
-        [
-          `New ${mode} loop started: ${formatLaneId(id)}`,
-          `Verify: \`${verifyCommand}\``,
-          guardCommand ? `Guard: \`${guardCommand}\`` : null,
-          promptVerifier ? `Prompt verifier: ${promptVerifier}` : null,
-          acceptancePolicy ? `Acceptance: ${acceptancePolicy}` : null,
-          `Goal: ${trimmed}`,
-          "",
-          "Run the verify command to establish a baseline, call multiloop_measure to persist it, then keep iterating until the loop is stopped/paused or a true blocker occurs.",
-          "Do not answer with a status report while this loop remains running; complete verify → measure → decide/log in state/results and continue.",
-        ]
-          .filter((l): l is string => l !== null)
-          .join("\n"),
-        { deliverAs: "steer" }
-      );
+      pi.sendUserMessage(buildLoopStartPrompt(state), { deliverAs: "steer" });
     },
   });
 
