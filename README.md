@@ -32,31 +32,38 @@ pi install npm:pi-multiloop
 ## Quick Start
 
 ```bash
-# Launch the setup guide (recommended for new loops)
+# Show current loop state. If there is no existing loop state, this launches the setup guide.
 /multiloop
+
+# Explicitly launch the setup guide for a new loop.
+/multiloop guide
 # The guide scans the repo, proposes verify/guard/checks, asks for confirmation,
 # then starts the loop after you reply "go".
 
-# Or start directly with an inline config
-/multiloop improve inference latency, verify: `./bench.py --quick`
+# Seed the guide with a natural-language goal. This does not bypass scan/clarify/confirm.
+/multiloop improve inference latency, verify likely ./bench.py --quick
 
-# Start a compound verifier loop: metric + mechanical correctness + prompt review
-/multiloop improve latency while completing docs/TODO.md, verify: `./bench.py --json`, guard: `npm test`, prompt verifier: `Review the generated output against fixtures; pass only if semantics are unchanged.`
+# Seed a compound verifier loop: metric + mechanical correctness + prompt review.
+/multiloop improve latency while completing docs/TODO.md; use npm test as guard and review output semantics against fixtures
 
-# Check status
+# Check detailed status and list runs.
 /multiloop status
+/multiloop ls
+/multiloop ls --archived
 
-# Start a second loop (different lane, same worktree)
-/multiloop
-# Describe: "reduce memory usage"
-# Different lane name, same worktree
-
-# Resume after restart
+# Resume, pause, stop, or archive. Lane-only works only when unambiguous; exact id is safest.
 /multiloop resume perf/run-001
-
-# Archive completed loop
+/multiloop pause perf
+/multiloop stop perf/run-001
 /multiloop archive perf/run-001
 ```
+
+## More docs
+
+- [Loop setup guide](docs/LOOP_GUIDE.md) — setup contract and launch handoff.
+- [State and lifecycle](docs/STATE.md) — registry/snapshot/runtime states, refusals, and compaction behavior.
+- [Project plan](docs/PLAN.md) — north stars and scope.
+- [Current TODO](docs/TODO.md) — publish gate and follow-on work.
 
 ## Modes
 

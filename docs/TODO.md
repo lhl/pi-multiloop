@@ -17,9 +17,9 @@ Keep tasks bite-sized and commit each logical unit separately.
 
 - [x] Soften the README claim from a full TUI dashboard to the Pi-native status surfaces that exist today.
 - [ ] Decide release target and close the changelog as `0.3.0` once this publish gate is complete.
-- [ ] Update `docs/PLAN.md` implementation checklist so completed scaffolding does not look undone.
-- [ ] Link `docs/STATE.md`, `docs/LOOP_GUIDE.md`, and this TODO from README.
-- [ ] Update README quick start to describe the final bare `/multiloop` default after command UX cleanup lands.
+- [x] Update `docs/PLAN.md` implementation checklist so completed scaffolding does not look undone.
+- [x] Link `docs/STATE.md`, `docs/LOOP_GUIDE.md`, and this TODO from README.
+- [x] Update README quick start to describe the final bare `/multiloop` default after command UX cleanup lands.
 
 ### Command and setup UX
 
