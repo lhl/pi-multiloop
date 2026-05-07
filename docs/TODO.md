@@ -1,6 +1,6 @@
 # TODO
 
-Future work tracked here. Current version: 0.2.0. Next publish target: 0.3.0.
+Future work tracked here. Current version: 0.3.0. Next publish target: TBD.
 
 This file is the working cleanup plan distilled from `docs/FEEDBACK.md`.
 Keep tasks bite-sized and commit each logical unit separately.
@@ -16,7 +16,7 @@ Keep tasks bite-sized and commit each logical unit separately.
 ### README and release surface
 
 - [x] Soften the README claim from a full TUI dashboard to the Pi-native status surfaces that exist today.
-- [ ] Decide release target and close the changelog as `0.3.0` once this publish gate is complete.
+- [x] Decide release target and close the changelog as `0.3.0` once this publish gate is complete.
 - [x] Update `docs/PLAN.md` implementation checklist so completed scaffolding does not look undone.
 - [x] Link `docs/STATE.md`, `docs/LOOP_GUIDE.md`, and this TODO from README.
 - [x] Update README quick start to describe the final bare `/multiloop` default after command UX cleanup lands.
@@ -47,12 +47,12 @@ Keep tasks bite-sized and commit each logical unit separately.
 
 ### Publish gate
 
-- [ ] README matches actual command behavior.
-- [ ] CHANGELOG has a dated `0.3.0` section.
-- [ ] `package.json` version matches the changelog.
-- [ ] `npx tsc --noEmit` passes.
-- [ ] `npx vitest run` passes.
-- [ ] `pi install .` smoke test succeeds.
+- [x] README matches actual command behavior.
+- [x] CHANGELOG has a dated `0.3.0` section.
+- [x] `package.json` version matches the changelog.
+- [x] `npx tsc --noEmit` passes.
+- [x] `npx vitest run` passes.
+- [x] `pi install .` smoke test succeeds.
 
 ## After publish
 

@@ -2,15 +2,30 @@
 
 ## Unreleased
 
+_No unreleased changes._
+
+## 0.3.0 - 2026-05-08
+
 ### Added
 - Add loop-owned auto-continuation: after start/resume/tool turns, running loops queue the next required action instead of relying on the model to keep going after one decide/log.
 - Persist `activeIteration` markers in `state.json` so measured-but-not-decided iterations survive compaction/resume.
 - Support compound verifiers by recording mechanical/prompt checks with `multiloop_measure`; keep/revert recommendations now combine metric improvement with all-checks-pass acceptance.
 - Add a guided loop setup flow (`/multiloop` or `/multiloop guide`) plus `multiloop_start` so agents scan, clarify, confirm, and then start a well-formed loop.
+- Add status-first bare `/multiloop`, grouped `/multiloop ls`, freeform goal seeding into the setup guide, lane-only target resolution, typed human-operation tools, and LLM disambiguation handoff.
+- Add punchlist `[~]` partial state, log/progress acceptance mode, `open_or_partial_items` verifier metric helper, and action counters in loop snapshots.
+
+### Changed
+- Default punchlist, research, and dev loops to log/progress acceptance; optimize loops continue to use keep/revert acceptance by default.
+- Make `state.json` writes atomic via temp-file write, fsync, and rename.
+- Document runtime refusal/recovery behavior, status vocabulary, guard execution policy, and the canonical setup contract.
 
 ### Fixed
 - Require `multiloop_decide` measurements to match the last recorded `multiloop_measure`, preventing unrecorded or stale verification decisions.
 - Soften auto-continue prompts so status questions are answered first and then loop work resumes only if the loop is still running.
+- Reconstruct state from accepted/logged results so reverted measurements do not become the current metric after resume.
+- Persist escalation metadata so pivot failure-streak resets survive reconstruction.
+- Validate lane and run-tag identifiers before using them in `.multiloop/active/...` paths.
+- Reject empty measurement arrays and require configured guard/prompt verifier verdicts to match the configured command/prompt explicitly.
 
 ## 0.2.0 - 2026-05-07
 
