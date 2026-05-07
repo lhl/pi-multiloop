@@ -3,7 +3,9 @@
   "version": "0.3.0",
   "description": "Autoloop/autoresearch extension for Pi with multi-lane isolation",
   "type": "module",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "files": [
     "extensions/",
     "skills/",
@@ -11,12 +13,16 @@
     "README.md"
   ],
   "pi": {
-    "extensions": ["./extensions"],
-    "skills": ["./skills"]
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ]
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/lhl/pi-multiloop"
+    "url": "git+https://github.com/lhl/pi-multiloop.git"
   },
   "author": "lhl <lhl@randomfoo.net>",
   "license": "MIT",
