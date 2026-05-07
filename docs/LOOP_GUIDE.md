@@ -6,13 +6,17 @@ Use this guide whenever a user wants to create a new autonomous loop but has not
 
 Help the user turn a natural-language goal into a safe, measurable, launch-ready pi-multiloop. The user should not need to know internal field names or write JSON by hand.
 
+## Audience
+
+pi-multiloop is a dev-facing tool for developers installing a loop helper into a repository. Optimize for clear repo-grounded defaults and safe operational handoff, not broad end-user onboarding.
+
 ## Hard Rules
 
 1. **Clarify before launch.** Always scan the repo and ask at least one repo-grounded clarification round before starting a new loop.
 2. **No edits during setup.** Reading files and running harmless discovery commands is allowed; code changes wait until the loop is launched.
 3. **Propose defaults.** Ask concrete questions with suggested defaults rather than open-ended forms.
 4. **Confirm before `multiloop_start`.** Present a short summary and wait for an explicit `go`, `start`, or `launch` before calling `multiloop_start`.
-5. **Two-phase boundary.** All setup questions happen before launch. After launch, the loop should continue autonomously until stopped, paused, completed, or blocked.
+5. **Two-phase launch boundary.** All clarification happens before explicit launch approval. After approval, the loop continues autonomously until stopped, paused, completed, or blocked.
 
 ## Scan Checklist
 
@@ -73,11 +77,12 @@ During runtime, the agent must pass check verdicts to `multiloop_measure.checks`
 
 ## Clarification Examples
 
-Prefer one compact round with defaults:
+Prefer one compact round with defaults and multiple-choice options:
 
-- “I found `scripts/bench.py` and `npm test`. Should the metric be open checklist items from `docs/TODO.md` (lower is better), with `npm test` as the guard?”
-- “For output correctness, should I use this prompt verifier: ‘compare generated output with the baseline fixture and pass only if semantics are unchanged’?”
-- “Should this run keep going until all TODO items are checked, or cap at 10 iterations first?”
+- “I found `scripts/bench.py` and `npm test`. Metric choice: A) open/partial checklist items from `docs/TODO.md` (lower is better, recommended), B) benchmark latency from `scripts/bench.py`, or C) another metric?”
+- “Guard choice: A) `npm test` (recommended), B) no guard, or C) a different command?”
+- “Prompt verifier choice: A) ‘compare generated output with the baseline fixture and pass only if semantics are unchanged’, B) no prompt verifier, or C) a different criterion?”
+- “Stop choice: A) until all TODO items are checked, B) cap at 10 iterations, or C) stop on a specific metric threshold?”
 
 ## Confirmation Summary
 
