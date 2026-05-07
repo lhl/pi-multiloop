@@ -24,6 +24,8 @@ import {
   loadState,
   reconstructState,
   appendResult,
+  recordActionCounter,
+  formatActionCounters,
 } from "./state.js";
 import {
   assessConfidence,
@@ -300,6 +302,7 @@ function loopSummary(cwd: string, entry: RegistryEntry): string {
   const details: string[] = [entry.mode];
   if (state && state.iteration > 0) {
     details.push(`${state.iteration} iter`);
+    details.push(formatActionCounters(state));
   }
   if (state != null && state.baseline !== null && state.bestMetric !== null && state.baseline !== state.bestMetric) {
     details.push(`${state.baseline} → ${state.bestMetric}`);
@@ -378,7 +381,7 @@ export function formatLoopStatusOverview(
   if (attachedRunning.length > 0) {
     lines.push("", "Attached running loops:");
     for (const state of attachedRunning) {
-      lines.push(`  - ${state.lane}/${state.runTag} (${state.mode}, ${state.iteration} iter)`);
+      lines.push(`  - ${state.lane}/${state.runTag} (${state.mode}, ${state.iteration} iter, ${formatActionCounters(state)})`);
       if (state.goal) lines.push(`    ${truncateDisplay(state.goal, 80)}`);
     }
   }
@@ -1155,6 +1158,12 @@ export default function (pi: ExtensionAPI) {
 
   const LogParams = Type.Object({
     lane: Type.String({ description: "Lane identifier" }),
+    action: Type.Optional(Type.Union([
+      Type.Literal("log"),
+      Type.Literal("skip"),
+      Type.Literal("crash"),
+      Type.Literal("blocked"),
+    ], { description: "Result action for log-only records" })),
     metric: Type.Optional(Type.Number({ description: "Metric value to log" })),
     note: Type.Optional(Type.String({ description: "Free-text note for this iteration" })),
   });
@@ -1178,10 +1187,12 @@ export default function (pi: ExtensionAPI) {
 
       const activeIteration = state.activeIteration;
       const metric = params.metric ?? activeIteration?.metric;
+      const action = params.action ?? "log";
+      const resultTimestamp = new Date().toISOString();
       appendResult(ctx.cwd, id, {
         iteration: state.iteration + 1,
-        timestamp: new Date().toISOString(),
-        action: "log",
+        timestamp: resultTimestamp,
+        action,
         metric,
         hypothesis: params.note ?? activeIteration?.hypothesis,
         measurements: activeIteration?.measurements,
@@ -1189,6 +1200,7 @@ export default function (pi: ExtensionAPI) {
         acceptancePassed: activeIteration?.acceptancePassed,
         acceptanceReason: activeIteration?.acceptanceReason,
       });
+      recordActionCounter(state, action, resultTimestamp);
 
       state.iteration++;
       delete state.activeIteration;
@@ -1199,7 +1211,7 @@ export default function (pi: ExtensionAPI) {
       activeStates.set(stateKey(id), state);
       updateStatus(ctx);
 
-      const lines = [`Logged iteration ${state.iteration} for ${formatLaneId(id)}.${metric !== undefined ? ` Metric: ${metric}` : ""}`];
+      const lines = [`Recorded ${action} iteration ${state.iteration} for ${formatLaneId(id)}.${metric !== undefined ? ` Metric: ${metric}` : ""}`];
       if (activeIteration?.checks?.length) {
         lines.push("Verification checks:");
         lines.push(...formatVerificationChecks(activeIteration.checks));

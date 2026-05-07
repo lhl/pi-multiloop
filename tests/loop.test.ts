@@ -192,6 +192,9 @@ describe("applyDecision", () => {
     expect(result.currentMetric).toBe(85);
     expect(result.bestMetric).toBe(85);
     expect(result.consecutiveFailures).toBe(0);
+    expect(result.keeps).toBe(1);
+    expect(result.lastAction).toBe("keep");
+    expect(result.lastActionAt).toBeDefined();
     expect(result.activeIteration).toBeUndefined();
 
     const saved = loadState(cwd, id);
@@ -343,6 +346,7 @@ describe("buildIterationContext", () => {
     expect(ctx).toContain("optimize");
     expect(ctx).toContain("Iteration: 0");
     expect(ctx).toContain("running");
+    expect(ctx).toContain("Actions: keeps=0, reverts=0, logs=0, crashes=0, blocked=0");
   });
 
   it("includes goal when present", () => {

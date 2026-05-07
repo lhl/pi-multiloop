@@ -196,6 +196,9 @@ describe("state reconstruction", () => {
     expect(reconstructed!.currentMetric).toBe(90);
     expect(reconstructed!.consecutiveFailures).toBe(2);
     expect(reconstructed!.bestMetric).toBe(90);
+    expect(reconstructed!.keeps).toBe(1);
+    expect(reconstructed!.reverts).toBe(2);
+    expect(reconstructed!.lastAction).toBe("revert");
   });
 
   it("does not let reverted measurements become the current metric", () => {
@@ -314,6 +317,12 @@ describe("createInitialState", () => {
     expect(state.bestMetric).toBeNull();
     expect(state.consecutiveFailures).toBe(0);
     expect(state.pivotCount).toBe(0);
+    expect(state.keeps).toBe(0);
+    expect(state.reverts).toBe(0);
+    expect(state.logs).toBe(0);
+    expect(state.crashes).toBe(0);
+    expect(state.blocked).toBe(0);
+    expect(state.lastAction).toBeNull();
     expect(state.status).toBe("running");
     expect(state.metricDirection).toBe("lower");
   });

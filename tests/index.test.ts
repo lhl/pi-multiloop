@@ -218,6 +218,7 @@ describe("formatLoopStatusOverview", () => {
 
     expect(output).toContain("Attached running loops:");
     expect(output).toContain("perf/run-001");
+    expect(output).toContain("keeps=0, reverts=0, logs=0, crashes=0, blocked=0");
     expect(output).toContain("Detached resumable loops:");
     expect(output).toContain("detached/run-002");
     expect(output).toContain("Inactive/history:");

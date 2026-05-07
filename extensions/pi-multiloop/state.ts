@@ -11,7 +11,7 @@ export interface VerificationCheck {
   evidence?: string;
 }
 
-export type ResultAction = "keep" | "revert" | "log" | "skip";
+export type ResultAction = "keep" | "revert" | "log" | "skip" | "crash" | "blocked";
 export type EscalationType = "refine" | "pivot" | "stop";
 
 export interface IterationResult {
@@ -59,6 +59,13 @@ export interface LoopState {
   bestMetric: number | null;
   consecutiveFailures: number;
   pivotCount: number;
+  keeps: number;
+  reverts: number;
+  logs: number;
+  crashes: number;
+  blocked: number;
+  lastAction: ResultAction | null;
+  lastActionAt?: string;
   status: "running" | "paused" | "completed" | "stopped" | "archived";
   verifyCommand: string;
   guardCommand?: string;
@@ -88,6 +95,55 @@ function statePath(cwd: string, id: LaneId): string {
 
 function lessonsPath(cwd: string, id: LaneId): string {
   return join(laneDir(cwd, id), LESSONS_FILE);
+}
+
+export function resetActionCounters(state: LoopState): void {
+  state.keeps = 0;
+  state.reverts = 0;
+  state.logs = 0;
+  state.crashes = 0;
+  state.blocked = 0;
+  state.lastAction = null;
+  delete state.lastActionAt;
+}
+
+export function recordActionCounter(
+  state: LoopState,
+  action: ResultAction,
+  timestamp: string = new Date().toISOString()
+): void {
+  state.keeps ??= 0;
+  state.reverts ??= 0;
+  state.logs ??= 0;
+  state.crashes ??= 0;
+  state.blocked ??= 0;
+
+  switch (action) {
+    case "keep": state.keeps++; break;
+    case "revert": state.reverts++; break;
+    case "log": state.logs++; break;
+    case "crash": state.crashes++; break;
+    case "blocked": state.blocked++; break;
+    case "skip": break;
+  }
+  state.lastAction = action;
+  state.lastActionAt = timestamp;
+}
+
+export function formatActionCounters(
+  state: Pick<LoopState, "keeps" | "reverts" | "logs" | "crashes" | "blocked" | "lastAction" | "lastActionAt">
+): string {
+  const parts = [
+    `keeps=${state.keeps ?? 0}`,
+    `reverts=${state.reverts ?? 0}`,
+    `logs=${state.logs ?? 0}`,
+    `crashes=${state.crashes ?? 0}`,
+    `blocked=${state.blocked ?? 0}`,
+  ];
+  if (state.lastAction) {
+    parts.push(`last=${state.lastAction}${state.lastActionAt ? ` at ${state.lastActionAt}` : ""}`);
+  }
+  return parts.join(", ");
 }
 
 export function appendResult(
@@ -160,6 +216,12 @@ export function reconstructState(cwd: string, id: LaneId): LoopState | null {
 
   const results = readResults(cwd, id);
   if (results.length === 0) {
+    state.keeps ??= 0;
+    state.reverts ??= 0;
+    state.logs ??= 0;
+    state.crashes ??= 0;
+    state.blocked ??= 0;
+    state.lastAction ??= null;
     if (state.activeIteration && state.activeIteration.iteration <= state.iteration) {
       delete state.activeIteration;
     }
@@ -177,8 +239,10 @@ export function reconstructState(cwd: string, id: LaneId): LoopState | null {
   let consecutiveFailures = 0;
   let replayedPivotCount = 0;
   let sawEscalationMetadata = false;
+  resetActionCounters(state);
 
   for (const result of results) {
+    recordActionCounter(state, result.action, result.timestamp);
     if (result.escalationType) {
       sawEscalationMetadata = true;
     }
@@ -264,6 +328,12 @@ export function createInitialState(
     bestMetric: null,
     consecutiveFailures: 0,
     pivotCount: 0,
+    keeps: 0,
+    reverts: 0,
+    logs: 0,
+    crashes: 0,
+    blocked: 0,
+    lastAction: null,
     status: "running",
     verifyCommand,
     guardCommand: options.guardCommand,

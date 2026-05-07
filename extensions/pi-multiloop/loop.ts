@@ -2,11 +2,14 @@ import type { LaneId } from "./lanes.js";
 import {
   type LoopState,
   type IterationResult,
+  type ResultAction,
   loadState,
   saveState,
   appendResult,
   appendLesson,
   reconstructState,
+  recordActionCounter,
+  formatActionCounters,
 } from "./state.js";
 import {
   type ConfidenceResult,
@@ -17,7 +20,7 @@ import {
 import { updateLoopStatus, formatLaneId } from "./lanes.js";
 
 export interface LoopDecision {
-  action: "keep" | "revert" | "log" | "skip";
+  action: ResultAction;
   reason: string;
   shouldEscalate: boolean;
   escalationType?: "refine" | "pivot" | "stop";
@@ -163,6 +166,7 @@ export function applyDecision(
   };
 
   appendResult(cwd, id, result);
+  recordActionCounter(state, decision.action, result.timestamp);
 
   state.iteration++;
   delete state.activeIteration;
@@ -209,6 +213,7 @@ export function buildIterationContext(state: LoopState): string {
   const lines: string[] = [];
   lines.push(`## Active Loop: ${state.lane}/${state.runTag}`);
   lines.push(`Mode: ${state.mode} | Iteration: ${state.iteration} | Status: ${state.status}`);
+  lines.push(`Actions: ${formatActionCounters(state)}`);
 
   if (state.goal) {
     lines.push(`Goal: ${state.goal}`);
