@@ -265,7 +265,7 @@ export function buildSetupGuidePrompt(goalSeed?: string): string {
     "Help me create a high-quality pi-multiloop run.",
     goalSeed?.trim() ? `User goal seed: ${goalSeed.trim()}` : undefined,
     "",
-    "Use docs/LOOP_GUIDE.md as the canonical setup contract. Summary:",
+    "Setup contract summary (the canonical version lives with the multiloop skill at `references/LOOP_GUIDE.md`):",
     "1. Scan the repo before proposing a loop: inspect structure, manifests/scripts/configs, tests/benches, and relevant TODO/plan files. Do not edit files during setup.",
     "2. Ask at least one repo-grounded clarification round before launch, even if the request seems obvious. Prefer concrete defaults and multiple-choice questions.",
     "3. Infer and confirm: goal, mode, lane, scope, metric name, metric direction, acceptance mode, verify command, guard command, prompt verifier, acceptance policy, stop condition/iteration cap, and rollback safety.",

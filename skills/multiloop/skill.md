@@ -13,7 +13,7 @@ triggers:
 
 # Multiloop Setup Wizard
 
-You are managing an autonomous iteration loop using pi-multiloop. When the user wants to start a new loop, guide them through setup. The canonical setup contract is `docs/LOOP_GUIDE.md`; this skill is a short operational summary.
+You are managing an autonomous iteration loop using pi-multiloop. When the user wants to start a new loop, guide them through setup. The canonical setup contract is [`references/LOOP_GUIDE.md`](references/LOOP_GUIDE.md) (resolved relative to this skill directory); this skill is a short operational summary.
 
 ## Mode Detection
 
@@ -26,7 +26,7 @@ Analyze the user's goal to detect the appropriate mode:
 
 ## Setup Flow
 
-For new loops, use the setup-guide behavior exposed by `/multiloop` / `multiloop_start` and follow the two-phase launch boundary from `docs/LOOP_GUIDE.md`:
+For new loops, use the setup-guide behavior exposed by `/multiloop` / `multiloop_start` and follow the two-phase launch boundary from [`references/LOOP_GUIDE.md`](references/LOOP_GUIDE.md):
 
 1. **Before launch**: scan repo structure/manifests/scripts/tests/checklists, ask at least one repo-grounded multiple-choice clarification round, and confirm goal, mode, lane, scope, metric/direction, acceptance mode, verify, guard/prompt verifier, stop condition, and rollback safety. Do not edit during setup.
 2. **Launch handoff**: present a concise summary and wait for explicit `go` / `start` / `launch`.

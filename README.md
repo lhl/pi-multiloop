@@ -60,7 +60,7 @@ pi install npm:pi-multiloop
 
 ## More docs
 
-- [Loop setup guide](docs/LOOP_GUIDE.md) — setup contract and launch handoff.
+- [Loop setup guide](skills/multiloop/references/LOOP_GUIDE.md) — setup contract and launch handoff (canonical version shipped with the multiloop skill).
 - [State and lifecycle](docs/STATE.md) — registry/snapshot/runtime states, refusals, and compaction behavior.
 - [Project plan](docs/PLAN.md) — north stars and scope.
 - [Current TODO](docs/TODO.md) — publish gate and follow-on work.
