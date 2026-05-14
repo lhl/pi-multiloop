@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.2 - 2026-05-15
+
+### Fixed
+- Move the canonical loop setup guide from `docs/LOOP_GUIDE.md` into the multiloop skill at `skills/multiloop/references/LOOP_GUIDE.md`. Previously the skill prompt and `buildSetupGuidePrompt()` cited `docs/LOOP_GUIDE.md` as a bare relative path; on npm or git installs the agent's cwd is the user's repo (not the package install dir), so the path missed the shipped file or picked up an unrelated doc. The guide now travels with the skill and resolves correctly under every install source.
+- Drop the filesystem-path reference from `buildSetupGuidePrompt()`. The inlined summary is the runtime source of truth; the skill-side canonical file is mentioned as an informational pointer only, so launch behavior no longer depends on a successful `read` of an external doc.
+
+### Changed
+- README link to the loop setup guide now points at the skill-relative path.
+
 ## 0.3.1 - 2026-05-08
 
 ### Changed
