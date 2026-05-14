@@ -24,13 +24,21 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       # npm 11.5.1+ is required for OIDC trusted publishing. Node 22 LTS ships
-      # with npm 10.x, so bump explicitly.
-      - name: Upgrade npm
-        run: npm install -g npm@latest
+      # with npm 10.x, so install a recent npm into a side prefix and put it
+      # on PATH. Installing into a separate prefix avoids the self-replace
+      # race that breaks `npm install -g npm@latest` ("Cannot find module
+      # 'promise-retry'") on setup-node's tool cache.
+      - name: Install recent npm
+        run: |
+          set -e
+          mkdir -p /tmp/npm-latest
+          npm install --prefix /tmp/npm-latest --no-audit --no-fund npm@latest
+          echo "/tmp/npm-latest/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Print toolchain versions
         run: |
           node --version
+          which npm
           npm --version
 
       - name: Install dependencies
