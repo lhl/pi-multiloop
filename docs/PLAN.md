@@ -61,7 +61,7 @@ What exists vs. what we need:
 - [x] modes.ts — Mode definitions, punchlist parser, mode detection
 - [x] index.ts — Extension entry point, pi events, tools, commands
 - [x] ui.ts — Pi-native status/list/resume surfaces plus dashboard formatting helpers
-- [x] skill.md — Setup wizard skill prompt
+- [x] `SKILL.md` — Setup wizard skill prompt
 - [x] Tests for lanes, state, metrics, loop engine, verifiers, prompts, list/status formatting
 - [ ] Local install + integration test
 - [ ] Add as devstack submodule

@@ -1,6 +1,8 @@
 ---
 name: multiloop
-description: Start and manage autonomous iteration loops for optimization, punchlist completion, research, and development
+description: Start and manage autonomous iteration loops for optimization, punchlist completion, research, and development. Use when the user requests repeated measured improvement, a bounded development loop, a research sweep, or punch-list completion.
+license: MIT
+compatibility: pi
 triggers:
   - multiloop
   - start a loop

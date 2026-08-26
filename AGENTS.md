@@ -13,7 +13,7 @@ Pi extension for multi-lane autonomous iteration loops. Supports optimization, p
 - Primary purpose: pi extension package (npm: `pi-multiloop`)
 - Source-of-truth docs: `docs/PLAN.md` (project plan + north stars), `README.md` (user-facing docs)
 - Extension entry point: `extensions/pi-multiloop/index.ts`
-- Skill: `skills/multiloop/skill.md`
+- Skill: `skills/multiloop/SKILL.md`
 
 ## Key Files
 
@@ -27,7 +27,7 @@ Pi extension for multi-lane autonomous iteration loops. Supports optimization, p
 | `extensions/pi-multiloop/loop.ts` | Core iterate/keep/revert/escalation engine |
 | `extensions/pi-multiloop/modes.ts` | Mode definitions and punchlist parser |
 | `extensions/pi-multiloop/ui.ts` | TUI dashboard widget |
-| `skills/multiloop/skill.md` | Setup wizard skill prompt |
+| `skills/multiloop/SKILL.md` | Setup wizard skill prompt |
 | `docs/PLAN.md` | North stars, gap analysis, implementation checklist |
 
 ## Architecture

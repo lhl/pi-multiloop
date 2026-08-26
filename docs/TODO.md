@@ -74,7 +74,7 @@ Keep tasks bite-sized and commit each logical unit separately.
 ### Docs and guide unification
 
 - [x] Make `docs/LOOP_GUIDE.md` the canonical setup contract.
-- [x] Reduce duplication between `skills/multiloop/skill.md`, `docs/LOOP_GUIDE.md`, and `buildSetupGuidePrompt()`; the skill and runtime prompt should summarize and point at the canonical guide.
+- [x] Reduce duplication between `skills/multiloop/SKILL.md`, `docs/LOOP_GUIDE.md`, and `buildSetupGuidePrompt()`; the skill and runtime prompt should summarize and point at the canonical guide.
 - [x] Name the two-phase boundary consistently: all clarification before launch; after explicit launch approval, continue autonomously until stopped, paused, completed, or blocked.
 - [x] Prefer multiple-choice clarification prompts in the guide examples.
 - [x] Add a short note that this is a dev-facing tool: the expected users are developers installing a loop helper, not a broad end-user audience.

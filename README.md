@@ -29,6 +29,8 @@ Other loop extensions only support one loop per session or worktree. If you're t
 pi install npm:pi-multiloop
 ```
 
+The package registers the `multiloop` setup skill. Pi loads its repository scan, clarification, launch, measurement, and continuation rules on demand.
+
 ## Quick Start
 
 ```bash

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Rename the setup skill entrypoint to `SKILL.md` so Pi discovers and registers it from the declared package skill directory.
+
 ## 0.3.2 - 2026-05-15
 
 ### Fixed
