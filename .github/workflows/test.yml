@@ -1,0 +1,44 @@
+name: Test
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['22', '24']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # package-lock.json is not committed, so this job installs from the
+      # manifest instead of npm ci.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        timeout-minutes: 10
+        run: npx vitest run
+
+      # Records the platform-specific result behind the EPERM that suspended
+      # Jouzu v0.1.4 Windows CI. Informational: the suite owns the assertion.
+      - name: Directory fsync probe
+        run: node scripts/dir-fsync-probe.mjs

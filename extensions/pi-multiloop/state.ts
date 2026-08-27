@@ -86,6 +86,60 @@ const RESULTS_FILE = "results.jsonl";
 const STATE_FILE = "state.json";
 const LESSONS_FILE = "lessons.md";
 
+/**
+ * Codes that mean "this platform or filesystem cannot flush a directory
+ * handle", as opposed to "the flush failed for a real reason".
+ *
+ * Windows always lands here: `fsyncSync()` on an opened directory raises
+ * `EPERM`, because NTFS exposes no directory-handle flush and journals
+ * metadata itself. Network and stacked filesystems (SMB/NFS/overlay/fuse)
+ * can also answer `ENOTSUP` or `EINVAL` on some hosts.
+ */
+const DIRECTORY_FSYNC_UNSUPPORTED_CODES = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "EINVAL"]);
+
+export function isDirectoryFsyncUnsupported(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return typeof code === "string" && DIRECTORY_FSYNC_UNSUPPORTED_CODES.has(code);
+}
+
+/**
+ * Flush a directory after an atomic rename so the new name survives a crash.
+ *
+ * Durability of the *contents* comes from the file fsync in `saveState`; this
+ * step only makes the rename itself durable. Where the platform has no
+ * directory-flush primitive we return "unsupported" without failing the write.
+ * Any other error on the directory path still throws, and a file fsync failure
+ * always throws, so a state write is never reported as durable when its bytes
+ * did not reach disk.
+ *
+ * `platform` is a parameter so the Windows branch is testable off-Windows.
+ */
+export function flushDirectoryForRename(
+  dir: string,
+  platform: NodeJS.Platform = process.platform
+): "flushed" | "unsupported" {
+  // Windows has no directory flush primitive; NTFS metadata journaling covers
+  // the rename. Attempting it costs a guaranteed EPERM on every save.
+  if (platform === "win32") return "unsupported";
+
+  let fd: number;
+  try {
+    fd = openSync(dir, "r");
+  } catch (err) {
+    if (isDirectoryFsyncUnsupported(err)) return "unsupported";
+    throw err;
+  }
+  try {
+    fsyncSync(fd);
+  } catch (err) {
+    if (isDirectoryFsyncUnsupported(err)) return "unsupported";
+    throw err;
+  } finally {
+    closeSync(fd);
+  }
+  return "flushed";
+}
+
 function resultsPath(cwd: string, id: LaneId): string {
   return join(laneDir(cwd, id), RESULTS_FILE);
 }
@@ -182,7 +236,6 @@ export function saveState(cwd: string, id: LaneId, state: LoopState): void {
   const tmpPath = join(dir, `.state.json.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
   const data = JSON.stringify(state, null, 2) + "\n";
   let fileFd: number | undefined;
-  let dirFd: number | undefined;
 
   try {
     fileFd = openSync(tmpPath, "w");
@@ -193,13 +246,9 @@ export function saveState(cwd: string, id: LaneId, state: LoopState): void {
 
     renameSync(tmpPath, finalPath);
 
-    dirFd = openSync(dir, "r");
-    fsyncSync(dirFd);
-    closeSync(dirFd);
-    dirFd = undefined;
+    flushDirectoryForRename(dir);
   } catch (err) {
     if (fileFd !== undefined) closeSync(fileFd);
-    if (dirFd !== undefined) closeSync(dirFd);
     rmSync(tmpPath, { force: true });
     throw err;
   }

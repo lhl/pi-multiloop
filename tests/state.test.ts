@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -12,6 +12,8 @@ import {
   appendLesson,
   readLessons,
   createInitialState,
+  flushDirectoryForRename,
+  isDirectoryFsyncUnsupported,
   type IterationResult,
 } from "../extensions/pi-multiloop/state.js";
 import type { LaneId } from "../extensions/pi-multiloop/lanes.js";
@@ -102,6 +104,89 @@ describe("state snapshot", () => {
   it("returns null when no state file exists", () => {
     expect(loadState(cwd, id)).toBeNull();
   });
+
+  it("creates, replaces, and reloads a loop state without leftovers", () => {
+    const state = createInitialState(id, "optimize", "echo 42", { metricDirection: "lower" });
+    const laneDir = join(cwd, ".multiloop", "active", id.lane, id.runTag);
+
+    saveState(cwd, id, state);
+    expect(loadState(cwd, id)?.iteration).toBe(0);
+
+    // Replace through the same lane repeatedly, as a running loop does.
+    state.iteration = 1;
+    state.baseline = 100;
+    state.currentMetric = 90;
+    saveState(cwd, id, state);
+    state.iteration = 2;
+    state.currentMetric = 80;
+    saveState(cwd, id, state);
+
+    const loaded = loadState(cwd, id);
+    expect(loaded?.iteration).toBe(2);
+    expect(loaded?.baseline).toBe(100);
+    expect(loaded?.currentMetric).toBe(80);
+    expect(readdirSync(laneDir)).toContain("state.json");
+    expect(readdirSync(laneDir).some((file) => file.includes(".tmp"))).toBe(false);
+
+    // Reload from disk after a process-style restart.
+    expect(reconstructState(cwd, id)?.currentMetric).toBe(80);
+
+    rmSync(laneDir, { recursive: true, force: true });
+    expect(loadState(cwd, id)).toBeNull();
+    expect(existsSync(laneDir)).toBe(false);
+  });
+
+  it("removes the temp state file when the atomic rename fails", () => {
+    const state = createInitialState(id, "optimize", "echo 42");
+    const laneDir = join(cwd, ".multiloop", "active", id.lane, id.runTag);
+
+    // A non-empty directory cannot receive a file rename, so renameSync fails
+    // after the temp file has been written and fsynced.
+    saveState(cwd, id, state);
+    rmSync(join(laneDir, "state.json"), { recursive: true, force: true });
+    mkdirSync(join(laneDir, "state.json"));
+    writeFileSync(join(laneDir, "state.json", "placeholder"), "x");
+
+    expect(() => saveState(cwd, id, state)).toThrow();
+    expect(readdirSync(laneDir).some((file) => file.includes(".tmp"))).toBe(false);
+  });
+});
+
+describe("directory flush after rename", () => {
+  it("classifies only unsupported-platform errors as skippable", () => {
+    for (const code of ["EPERM", "ENOTSUP", "EOPNOTSUPP", "EINVAL"]) {
+      expect(isDirectoryFsyncUnsupported(Object.assign(new Error(code), { code }))).toBe(true);
+    }
+    for (const code of ["ENOENT", "EACCES", "EBUSY", "EDQUOT"]) {
+      expect(isDirectoryFsyncUnsupported(Object.assign(new Error(code), { code }))).toBe(false);
+    }
+    expect(isDirectoryFsyncUnsupported(new Error("boom"))).toBe(false);
+    expect(isDirectoryFsyncUnsupported(undefined)).toBe(false);
+  });
+
+  it("does not attempt a directory flush on Windows", () => {
+    // The v0.1.4 Windows failure was EPERM from fsyncSync on the lane
+    // directory. The primitive must be skipped, not caught-and-rethrown, so a
+    // directory Windows cannot sync never reaches fsyncSync. A missing path
+    // would throw ENOENT on POSIX, so "unsupported" proves the early return.
+    expect(flushDirectoryForRename(join(cwd, "does-not-exist"), "win32")).toBe("unsupported");
+  });
+});
+
+describe("directory flush on POSIX platforms", () => {
+  it.skipIf(process.platform === "win32")("flushes a real directory", () => {
+    const state = createInitialState(id, "optimize", "echo 42");
+    saveState(cwd, id, state);
+    const laneDir = join(cwd, ".multiloop", "active", id.lane, id.runTag);
+    expect(flushDirectoryForRename(laneDir)).toBe("flushed");
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "propagates a genuine directory error instead of skipping",
+    () => {
+      expect(() => flushDirectoryForRename(join(cwd, "does-not-exist"))).toThrow(/ENOENT/);
+    }
+  );
 });
 
 describe("state reconstruction", () => {
