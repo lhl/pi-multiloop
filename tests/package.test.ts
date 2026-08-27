@@ -7,7 +7,7 @@ const skill = readFileSync(new URL("../skills/multiloop/SKILL.md", import.meta.u
 describe("pi package resources", () => {
   it("declares a discoverable multiloop skill", () => {
     expect(packageJson.pi.skills).toEqual(["./skills"]);
-    expect(skill).toMatch(/^---\nname: multiloop\n/);
+    expect(skill).toMatch(/^---\r?\nname: multiloop\r?\n/);
     expect(skill).toContain("license: MIT");
     expect(skill).toContain("references/LOOP_GUIDE.md");
   });
