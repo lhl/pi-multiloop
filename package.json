@@ -1,6 +1,6 @@
 {
   "name": "pi-multiloop",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Autoloop/autoresearch extension for Pi with multi-lane isolation",
   "type": "module",
   "keywords": [

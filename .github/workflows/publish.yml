@@ -3,7 +3,6 @@ name: Publish
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
 
 # OIDC trusted publishing requires id-token; gh release create needs contents write.
 permissions:
@@ -13,26 +12,26 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      # npm 11.5.1+ is required for OIDC trusted publishing. Node 22 LTS ships
-      # with npm 10.x, so install a recent npm into a side prefix and put it
-      # on PATH. Installing into a separate prefix avoids the self-replace
-      # race that breaks `npm install -g npm@latest` ("Cannot find module
-      # 'promise-retry'") on setup-node's tool cache.
+      # npm 11.5.1+ is required for OIDC trusted publishing. Install the
+      # reviewed version into a side prefix to avoid replacing setup-node's npm.
       - name: Install recent npm
         run: |
           set -e
           mkdir -p /tmp/npm-latest
-          npm install --prefix /tmp/npm-latest --no-audit --no-fund npm@latest
+          npm install --prefix /tmp/npm-latest --no-audit --no-fund npm@11.16.0
           echo "/tmp/npm-latest/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Print toolchain versions
@@ -42,7 +41,7 @@ jobs:
           npm --version
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --ignore-scripts --no-audit --no-fund
 
       - name: Typecheck
         run: npx tsc --noEmit
@@ -50,10 +49,7 @@ jobs:
       - name: Test
         run: npx vitest run
 
-      # Refuse to publish if the tag does not match package.json. Skipped on
-      # workflow_dispatch (no tag context), in which case we trust package.json.
       - name: Verify tag matches package version
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
           TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -67,7 +63,6 @@ jobs:
         run: npm publish --provenance --access public
 
       - name: Extract changelog section for this version
-        if: startsWith(github.ref, 'refs/tags/v')
         id: changelog
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -85,7 +80,6 @@ jobs:
           cat /tmp/release-notes.md
 
       - name: Create GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

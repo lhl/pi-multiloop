@@ -64,11 +64,9 @@ The tag push triggers `.github/workflows/publish.yml`. Watch it at https://githu
 4. `npm publish --provenance --access public` (authenticated via OIDC).
 5. Extract the matching section from `CHANGELOG.md` and `gh release create` with it.
 
-## Manual Re-Run
+## Failed Run
 
-If a tag is already pushed but the workflow failed midway, re-run it from the Actions tab. Pre-existing-tag re-runs are safe; npm will reject a duplicate version (the workflow stops, no harm done).
-
-A manual `workflow_dispatch` run skips the tag-vs-version guard and the GitHub Release step, so it is mainly useful for republishing the version currently in `package.json` after a transient infra failure.
+Before retrying, run `npm view pi-multiloop@X.Y.Z version --json`. If npm accepted the version, do not rerun the publish step; verify the immutable package and create the missing GitHub Release. If npm did not accept it, rerun the exact tag workflow from the Actions page.
 
 ## After Publishing
 
@@ -81,8 +79,3 @@ A manual `workflow_dispatch` run skips the tag-vs-version guard and the GitHub R
 - No long-lived `NPM_TOKEN` secret to rotate, lose, or leak.
 - Every publish carries SLSA build provenance (`--provenance`) so consumers can verify it came from this repo's CI.
 - Maintainer access on npm is tied to the GitHub repo + workflow pair, so revoking publish rights is a one-click registry action.
-
-## Future Considerations
-
-- Add a separate CI workflow (typecheck + test on PRs) so the publish workflow is purely a release path.
-- Pin a GitHub Environment for the publish job (e.g., `npm-publish`) to require manual approval before the publish step runs.

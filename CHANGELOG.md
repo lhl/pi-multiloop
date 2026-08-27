@@ -2,8 +2,10 @@
 
 ## Unreleased
 
+## 0.3.3 - 2026-08-27
+
 ### Fixed
-- Stop calling `fsyncSync()` on the lane directory in `saveState()`. Node cannot flush a directory handle on Windows, so every `multiloop_start` on Windows died with `EPERM: operation not permitted, fsync` before writing any loop state (observed in Jouzu v0.1.4 Windows CI). The temporary-file write, file fsync, close, and atomic rename are unchanged; the directory flush now runs only where the platform supports it, so NTFS metadata journaling covers the rename there. Other filesystems that report `EPERM`, `ENOTSUP`, `EOPNOTSUPP`, or `EINVAL` for a directory handle skip the same optional step, while any other directory error — and every file fsync error — still fails the write and removes the temp file.
+- Stop calling `fsyncSync()` on the lane directory in `saveState()`. Node cannot flush a directory handle on Windows, so every `multiloop_start` on Windows died with `EPERM: operation not permitted, fsync` before writing any loop state. The temporary-file write, file fsync, close, and atomic rename are unchanged; the directory flush now runs only where the platform supports it. Other filesystems that report `EPERM`, `ENOTSUP`, `EOPNOTSUPP`, or `EINVAL` from the directory flush skip the same optional step, while directory-open errors, other flush errors, and every file fsync error still fail the write.
 - Rename the setup skill entrypoint to `SKILL.md` so Pi discovers and registers it from the declared package skill directory.
 
 ## 0.3.2 - 2026-05-15
