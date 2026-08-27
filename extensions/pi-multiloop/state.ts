@@ -87,8 +87,8 @@ const STATE_FILE = "state.json";
 const LESSONS_FILE = "lessons.md";
 
 /**
- * Codes that mean "this platform or filesystem cannot flush a directory
- * handle", as opposed to "the flush failed for a real reason".
+ * Codes returned by `fsyncSync()` when the platform or filesystem cannot
+ * flush a directory handle, as opposed to a real persistence failure.
  *
  * Windows always lands here: `fsyncSync()` on an opened directory raises
  * `EPERM`, because NTFS exposes no directory-handle flush and journals
@@ -122,13 +122,9 @@ export function flushDirectoryForRename(
   // the rename. Attempting it costs a guaranteed EPERM on every save.
   if (platform === "win32") return "unsupported";
 
-  let fd: number;
-  try {
-    fd = openSync(dir, "r");
-  } catch (err) {
-    if (isDirectoryFsyncUnsupported(err)) return "unsupported";
-    throw err;
-  }
+  // Opening the directory is not the optional operation. Propagate every
+  // open error; only fsync errors can mean that directory flush is unsupported.
+  const fd = openSync(dir, "r");
   try {
     fsyncSync(fd);
   } catch (err) {
