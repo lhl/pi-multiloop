@@ -28,10 +28,8 @@ describe("decideCompactionResumeTiming", () => {
     expect(decideCompactionResumeTiming({
       hasRunningStates: false,
       agentRunning: false,
-      isIdle: true,
-      now: 10_000,
-      lastActiveAgentEndAt: 9_000,
-      lastInputAt: 1_000,
+      reason: "threshold",
+      willRetry: false,
     })).toBe("skip");
   });
 
@@ -39,21 +37,17 @@ describe("decideCompactionResumeTiming", () => {
     expect(decideCompactionResumeTiming({
       hasRunningStates: true,
       agentRunning: true,
-      isIdle: false,
-      now: 10_000,
-      lastActiveAgentEndAt: 0,
-      lastInputAt: 1_000,
+      reason: "threshold",
+      willRetry: false,
     })).toBe("after-current-agent-end");
   });
 
-  it("sends a resume after auto-compaction that follows an active agent turn", () => {
+  it("sends a resume after threshold compaction between turns", () => {
     expect(decideCompactionResumeTiming({
       hasRunningStates: true,
       agentRunning: false,
-      isIdle: true,
-      now: 10_000,
-      lastActiveAgentEndAt: 9_900,
-      lastInputAt: 1_000,
+      reason: "threshold",
+      willRetry: false,
     })).toBe("after-compaction");
   });
 
@@ -61,23 +55,36 @@ describe("decideCompactionResumeTiming", () => {
     expect(decideCompactionResumeTiming({
       hasRunningStates: true,
       agentRunning: false,
-      isIdle: true,
-      now: 10_000,
-      lastActiveAgentEndAt: 1_000,
-      lastInputAt: 500,
-      recentWindowMs: 100,
+      reason: "manual",
+      willRetry: false,
     })).toBe("skip");
   });
 
-  it("skips pre-prompt compaction because the submitted prompt will continue", () => {
+  it("resumes after a manual compaction issued during an agent turn", () => {
+    expect(decideCompactionResumeTiming({
+      hasRunningStates: true,
+      agentRunning: true,
+      reason: "manual",
+      willRetry: false,
+    })).toBe("after-current-agent-end");
+  });
+
+  it("skips overflow recovery because the aborted turn is retried", () => {
     expect(decideCompactionResumeTiming({
       hasRunningStates: true,
       agentRunning: false,
-      isIdle: true,
-      now: 10_000,
-      lastActiveAgentEndAt: 9_000,
-      lastInputAt: 9_950,
+      reason: "overflow",
+      willRetry: true,
     })).toBe("skip");
+  });
+
+  it("resumes when the reason is unavailable and the agent is between turns", () => {
+    expect(decideCompactionResumeTiming({
+      hasRunningStates: true,
+      agentRunning: false,
+      reason: undefined,
+      willRetry: false,
+    })).toBe("after-compaction");
   });
 });
 
@@ -132,21 +139,37 @@ describe("buildExplicitResumePrompt", () => {
 });
 
 describe("buildSetupGuidePrompt", () => {
-  it("asks the agent to scan, clarify, confirm, and start with multiloop_start", () => {
+  it("asks the agent to scan, propose once, and start with multiloop_start", () => {
     const prompt = buildSetupGuidePrompt();
 
-    expect(prompt).toContain("Scan the repo before proposing a loop");
-    expect(prompt).toContain("Ask at least one repo-grounded clarification round");
+    expect(prompt).toContain("Scan the repo before proposing anything");
+    expect(prompt).toContain("Propose the whole configuration in one message");
+    expect(prompt).toContain("Wait for one approval");
     expect(prompt).toContain("metric improves and every check passes");
     expect(prompt).toContain("call multiloop_start");
     expect(prompt).toContain("Reply go to start");
+  });
+
+  it("limits clarification to a missing metric, an ambiguous source, or a safety blocker", () => {
+    const prompt = buildSetupGuidePrompt();
+
+    expect(prompt).toContain("Ask a clarification round only when one of these is true");
+    expect(prompt).toContain("no command that produces a metric");
+    expect(prompt).toContain("more than one plausible metric source");
+    expect(prompt).toContain("destructive or otherwise unsafe");
+    expect(prompt).toContain("Otherwise do not ask questions");
+    expect(prompt).not.toContain("Ask at least one repo-grounded clarification round");
+  });
+
+  it("sends a request that needs no metric to /goal instead", () => {
+    expect(buildSetupGuidePrompt()).toContain("it is a quick goal, not a measured run");
   });
 
   it("includes a freeform goal seed when provided", () => {
     const prompt = buildSetupGuidePrompt("finish docs/TODO.md safely");
 
     expect(prompt).toContain("User goal seed: finish docs/TODO.md safely");
-    expect(prompt).toContain("Scan the repo before proposing a loop");
+    expect(prompt).toContain("Scan the repo before proposing anything");
   });
 });
 

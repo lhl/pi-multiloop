@@ -230,7 +230,9 @@ export function buildIterationContext(state: LoopState): string {
     lines.push(`Best: ${state.bestMetric}`);
   }
 
-  lines.push(`Verify: \`${state.verifyCommand}\``);
+  if (state.verifyCommand) {
+    lines.push(`Verify: \`${state.verifyCommand}\``);
+  }
   if (state.guardCommand) {
     lines.push(`Guard: \`${state.guardCommand}\``);
   }

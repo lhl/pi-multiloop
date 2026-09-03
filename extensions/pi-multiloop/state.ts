@@ -67,7 +67,15 @@ export interface LoopState {
   lastAction: ResultAction | null;
   lastActionAt?: string;
   status: "running" | "paused" | "completed" | "stopped" | "archived";
-  verifyCommand: string;
+  /**
+   * How the run was launched. "goal" runs come from `/goal`: their
+   * configuration is derived from one objective, they carry no metric or verify
+   * command, and they converge on the completion audit. States written before
+   * this field existed are measured runs.
+   */
+  kind?: "goal" | "measured";
+  /** Absent on quick goals, which have no metric to verify. */
+  verifyCommand?: string;
   guardCommand?: string;
   promptVerifier?: string;
   acceptancePolicy?: string;
@@ -77,9 +85,54 @@ export interface LoopState {
   scope?: string;
   goal?: string;
   activeIteration?: ActiveIteration;
+  /** Optional user-set cumulative token cap. Never reported to the model. */
+  tokenBudget?: number;
+  /** When true, completion bypasses the open-task gate. User-owned. */
+  allowOpenTasks?: boolean;
+  /** Work accounting. Shown to the user; never placed in model context. */
+  accounting?: RunAccounting;
   startedAt: string;
   lastUpdated: string;
   config: Record<string, unknown>;
+}
+
+/**
+ * Cumulative work performed by a run.
+ *
+ * These counters exist to answer "what did this cost?" after the fact. They are
+ * rendered in status views and the end-of-run summary and must never reach the
+ * model: a per-turn counter reads as a context-window gauge regardless of its
+ * label, and models have curtailed active work in response to one.
+ */
+export interface RunAccounting {
+  /** Seconds the agent spent working on this run. */
+  activeSeconds: number;
+  /** Agent turns attributed to this run. */
+  turns: number;
+  /** Tool calls made during those turns. */
+  toolCalls: number;
+  /** Cumulative non-cached input tokens. */
+  inputTokens: number;
+  /** Cumulative output tokens. */
+  outputTokens: number;
+}
+
+export function emptyAccounting(): RunAccounting {
+  return { activeSeconds: 0, turns: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0 };
+}
+
+/** Read accounting from a state that may predate the field. */
+export function readAccounting(state: LoopState): RunAccounting {
+  return { ...emptyAccounting(), ...(state.accounting ?? {}) };
+}
+
+/** Total tokens charged against an optional budget. */
+export function accountedTokens(accounting: RunAccounting): number {
+  return accounting.inputTokens + accounting.outputTokens;
+}
+
+export function isQuickGoal(state: LoopState): boolean {
+  return state.kind === "goal";
 }
 
 const RESULTS_FILE = "results.jsonl";
@@ -352,8 +405,10 @@ export function readLessons(cwd: string, id: LaneId): string {
 export function createInitialState(
   id: LaneId,
   mode: string,
-  verifyCommand: string,
+  verifyCommand: string | undefined,
   options: {
+    kind?: "goal" | "measured";
+    tokenBudget?: number;
     guardCommand?: string;
     promptVerifier?: string;
     acceptancePolicy?: string;
@@ -382,6 +437,7 @@ export function createInitialState(
     blocked: 0,
     lastAction: null,
     status: "running",
+    kind: options.kind ?? "measured",
     verifyCommand,
     guardCommand: options.guardCommand,
     promptVerifier: options.promptVerifier,
@@ -391,6 +447,8 @@ export function createInitialState(
     acceptanceMode: options.acceptanceMode ?? (mode === "optimize" ? "keep-revert" : "log"),
     scope: options.scope,
     goal: options.goal,
+    tokenBudget: options.tokenBudget,
+    accounting: emptyAccounting(),
     startedAt: new Date().toISOString(),
     lastUpdated: new Date().toISOString(),
     config: options.config ?? {},

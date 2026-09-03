@@ -19,6 +19,11 @@ import {
 } from "./lanes.js";
 import {
   type LoopState,
+  type RunAccounting,
+  accountedTokens,
+  emptyAccounting,
+  isQuickGoal,
+  readAccounting,
   createInitialState,
   saveState,
   loadState,
@@ -44,6 +49,20 @@ import {
 } from "./loop.js";
 import { MODES, type LoopMode } from "./modes.js";
 import {
+  discoverTasksStore,
+  formatTaskListSnapshot,
+  readTaskSnapshot,
+  type TaskSnapshot,
+} from "./tasks.js";
+import {
+  buildQuickGoalContinuationPrompt,
+  buildQuickGoalStartPrompt,
+  deriveGoalMode,
+  deriveLane,
+  parseGoalCommand,
+  validateObjective,
+} from "./goal.js";
+import {
   assessAcceptance,
   ensureRequiredChecks,
   formatVerificationChecks,
@@ -51,7 +70,6 @@ import {
 } from "./verifiers.js";
 
 const activeStates = new Map<string, LoopState>();
-const COMPACTION_RESUME_RECENT_MS = 5000;
 let agentRunning = false;
 let resumeAfterCompact = false;
 let lastCompactionEntryId: string | undefined;
@@ -60,6 +78,122 @@ let lastActiveAgentEndAt = 0;
 let lastInputAt = 0;
 let loopTurnActive = false;
 let loopTurnReason: string | undefined;
+let turnStartedAt = 0;
+let toolCallsThisTurn = 0;
+let toolCallsSinceContinuation = 0;
+let continuationsQueued = 0;
+
+/**
+ * Accounting is attributed to every run that was active during the turn. With
+ * one run — the common case — that is exact; with several concurrent lanes each
+ * run records the work performed while it was active rather than an
+ * unattributable share of it. Nothing here reaches the model.
+ */
+function accountTurn(
+  ctx: ExtensionContext,
+  usage: { input: number; output: number },
+  elapsedSeconds: number,
+  toolCalls: number
+): void {
+  for (const state of activeStates.values()) {
+    if (state.status !== "running") continue;
+    const accounting = readAccounting(state);
+    accounting.activeSeconds += elapsedSeconds;
+    accounting.turns += 1;
+    accounting.toolCalls += toolCalls;
+    accounting.inputTokens += usage.input;
+    accounting.outputTokens += usage.output;
+    state.accounting = accounting;
+    saveState(ctx.cwd, { lane: state.lane, runTag: state.runTag }, state);
+  }
+}
+
+function collectAssistantUsage(messages: unknown[]): { input: number; output: number } {
+  let input = 0;
+  let output = 0;
+  for (const message of messages) {
+    if (typeof message !== "object" || message === null) continue;
+    const record = message as Record<string, unknown>;
+    if (record.role !== "assistant") continue;
+    const usage = record.usage;
+    if (typeof usage !== "object" || usage === null) continue;
+    const fields = usage as Record<string, unknown>;
+    input += numericField(fields.input);
+    output += numericField(fields.output);
+  }
+  return { input, output };
+}
+
+function numericField(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+export function formatDuration(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.trunc(totalSeconds));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.trunc(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.trunc(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours >= 24) return `${Math.trunc(hours / 24)}d ${hours % 24}h ${remainingMinutes}m`;
+  return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
+}
+
+export function formatTokenCount(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `${trimDecimal(value / 1_000_000)}M`;
+  if (abs >= 1_000) return `${trimDecimal(value / 1_000)}K`;
+  return String(Math.trunc(value));
+}
+
+function trimDecimal(value: number): string {
+  const rounded = value.toFixed(1);
+  return rounded.endsWith(".0") ? rounded.slice(0, -2) : rounded;
+}
+
+/**
+ * One-line work summary for the user. Callers must not put this in a prompt.
+ */
+export function formatAccounting(accounting: RunAccounting, tokenBudget?: number): string {
+  const tokens = accountedTokens(accounting);
+  const budget = tokenBudget === undefined ? "" : ` of ${formatTokenCount(tokenBudget)}`;
+  return [
+    `time ${formatDuration(accounting.activeSeconds)}`,
+    `${accounting.turns} turn${accounting.turns === 1 ? "" : "s"}`,
+    `${accounting.toolCalls} tool call${accounting.toolCalls === 1 ? "" : "s"}`,
+    `${formatTokenCount(tokens)}${budget} tokens`,
+  ].join(", ");
+}
+
+/** Live pi-tasks state for this session, or null when there is no store. */
+function taskSnapshotFor(ctx: ExtensionContext): TaskSnapshot | null {
+  try {
+    const discovery = discoverTasksStore(ctx.cwd, ctx.sessionManager.getSessionId());
+    return readTaskSnapshot(discovery.storePath);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * pi-tasks drives the next turn itself when its automatic mode is on and it has
+ * already queued work. Stand down so the two do not both continue.
+ */
+function cascadingTasksWillDrive(ctx: ExtensionContext): boolean {
+  try {
+    const discovery = discoverTasksStore(ctx.cwd, ctx.sessionManager.getSessionId());
+    if (discovery.autoMode === "off") return false;
+    return ctx.hasPendingMessages();
+  } catch {
+    return false;
+  }
+}
+
+/** True once a budgeted run has spent its cap. */
+export function budgetExhausted(state: LoopState): boolean {
+  if (state.tokenBudget === undefined) return false;
+  return accountedTokens(readAccounting(state)) >= state.tokenBudget;
+}
 
 function stateKey(id: LaneId): string {
   return `${id.lane}/${id.runTag}`;
@@ -95,6 +229,10 @@ function shouldContinueAfterUserInput(text: string): boolean {
 }
 
 function activeIterationSummary(state: LoopState): string {
+  if (isQuickGoal(state)) {
+    return `- ${state.lane}/${state.runTag}: continue the quick goal. Do the next concrete action toward the objective, record finished steps with multiloop_log, and call update_goal with status "complete" only after the completion audit passes.`;
+  }
+
   if (state.baseline === null) {
     return `- ${state.lane}/${state.runTag}: baseline is not recorded. Run verify \`${state.verifyCommand}\`, then call multiloop_measure to persist the baseline.`;
   }
@@ -121,40 +259,45 @@ function activeIterationSummary(state: LoopState): string {
 
 export type CompactionResumeTiming = "skip" | "after-current-agent-end" | "after-compaction";
 
+/** Pi reports why a compaction ran; earlier releases did not. */
+export type CompactionReason = "manual" | "threshold" | "overflow" | undefined;
+
 export interface CompactionResumeTimingInput {
   hasRunningStates: boolean;
   agentRunning: boolean;
-  isIdle: boolean;
-  now: number;
-  lastActiveAgentEndAt: number;
-  lastInputAt: number;
-  recentWindowMs?: number;
+  reason: CompactionReason;
+  willRetry: boolean;
 }
 
+export function compactionReason(event: unknown): CompactionReason {
+  const reason = (event as { reason?: unknown } | null)?.reason;
+  return reason === "manual" || reason === "threshold" || reason === "overflow" ? reason : undefined;
+}
+
+export function compactionWillRetry(event: unknown): boolean {
+  return (event as { willRetry?: unknown } | null)?.willRetry === true;
+}
+
+/**
+ * Decide whether a compaction should be followed by a loop resume.
+ *
+ * Pi supplies `reason` and `willRetry` on its compaction events, so this reads
+ * the reported cause directly. It replaces the timing window used through
+ * 0.3.3, which inferred the cause from how recently a turn or keystroke
+ * happened and misread slow turns and fast typing alike.
+ */
 export function decideCompactionResumeTiming(input: CompactionResumeTimingInput): CompactionResumeTiming {
   if (!input.hasRunningStates) return "skip";
+
+  // Overflow recovery re-runs the aborted turn itself; a resume would duplicate it.
+  if (input.willRetry) return "skip";
+
+  // A user typing /compact while work is idle is asking to compact, not to
+  // restart the loop.
+  if (input.reason === "manual" && !input.agentRunning) return "skip";
+
   if (input.agentRunning) return "after-current-agent-end";
-
-  const recentWindowMs = input.recentWindowMs ?? COMPACTION_RESUME_RECENT_MS;
-  const followsRecentInput =
-    input.lastInputAt > input.lastActiveAgentEndAt && input.now - input.lastInputAt <= recentWindowMs;
-  if (followsRecentInput) {
-    // Pi can compact before submitting a freshly typed/extension-injected prompt.
-    // In that case the prompt that caused the preflight compaction will continue
-    // normally, so injecting an additional resume would duplicate work.
-    return "skip";
-  }
-
-  const followsRecentAgentEnd =
-    input.lastActiveAgentEndAt > 0 && input.now - input.lastActiveAgentEndAt <= recentWindowMs;
-  if (followsRecentAgentEnd) return "after-compaction";
-
-  // Defensive fallback for compaction implementations that emit while the agent
-  // is still busy but before agent_start/agent_end bookkeeping has caught up.
-  if (!input.isIdle) return "after-current-agent-end";
-
-  // Manual /compact while idle should not restart the agent.
-  return "skip";
+  return "after-compaction";
 }
 
 function queueCompactionResume(
@@ -192,7 +335,9 @@ function queueLoopAutoContinue(
     if (ctx.hasPendingMessages()) return;
     try {
       markLoopTurn(`auto-continue:${reason}`);
-      pi.sendUserMessage(buildAutoContinuePrompt(latestStates), { deliverAs: "followUp" });
+      continuationsQueued += 1;
+      toolCallsSinceContinuation = 0;
+      pi.sendUserMessage(buildAutoContinuePrompt(latestStates, taskSnapshotFor(ctx)), { deliverAs: "followUp" });
     } catch (err) {
       ctx.ui.notify(`multiloop auto-continue failed: ${(err as Error).message}`, "error");
     }
@@ -241,7 +386,20 @@ export function buildCompactionResumePrompt(
   );
 }
 
-export function buildAutoContinuePrompt(states: LoopState[]): string {
+export function buildAutoContinuePrompt(states: LoopState[], taskSnapshot?: TaskSnapshot | null): string {
+  // A quick goal has no verify/measure/decide cycle to continue into, so it
+  // gets the objective and completion audit rather than loop mechanics.
+  if (states.length === 1 && states[0] && isQuickGoal(states[0])) {
+    const goal = states[0];
+    return buildQuickGoalContinuationPrompt({
+      lane: goal.lane,
+      runTag: goal.runTag,
+      objective: goal.goal ?? "",
+      taskSnapshot: taskSnapshot ? formatTaskListSnapshot(taskSnapshot) : null,
+      hasOpenTasks: (taskSnapshot?.open.length ?? 0) > 0,
+    });
+  }
+
   const contexts = states.map((state) => buildIterationContext(state)).join("\n\n");
   const nextActions = states.map(activeIterationSummary).join("\n");
   return [
@@ -262,19 +420,21 @@ export function buildAutoContinuePrompt(states: LoopState[]): string {
 
 export function buildSetupGuidePrompt(goalSeed?: string): string {
   return [
-    "Help me create a high-quality pi-multiloop run.",
+    "Set up a pi-multiloop measured run and get it started with one approval.",
     goalSeed?.trim() ? `User goal seed: ${goalSeed.trim()}` : undefined,
     "",
-    "Setup contract summary (the canonical version lives with the multiloop skill at `references/LOOP_GUIDE.md`):",
-    "1. Scan the repo before proposing a loop: inspect structure, manifests/scripts/configs, tests/benches, and relevant TODO/plan files. Do not edit files during setup.",
-    "2. Ask at least one repo-grounded clarification round before launch, even if the request seems obvious. Prefer concrete defaults and multiple-choice questions.",
-    "3. Infer and confirm: goal, mode, lane, scope, metric name, metric direction, acceptance mode, verify command, guard command, prompt verifier, acceptance policy, stop condition/iteration cap, and rollback safety.",
-    "4. Respect the two-phase launch boundary: all clarification before explicit go/start/launch; after approval, continue autonomously until stopped, paused, completed, or blocked.",
-    "5. For punchlists, default to acceptanceMode=log with open_or_partial_items lower-is-better progress; use keep-revert only when the user confirms a metric optimization goal plus rollback safety.",
-    "6. For compound goals like performance improves while output remains correct, configure a metric verify command plus mechanical/prompt checks. Acceptance should be: metric improves and every check passes.",
-    "7. After approval, call multiloop_start with the confirmed config. Do not ask another question after approval unless a true safety blocker appears.",
+    "Setup contract (the canonical version lives with the multiloop skill at `references/LOOP_GUIDE.md`):",
+    "1. Scan the repo before proposing anything: structure, manifests/scripts/configs, tests/benches, and relevant TODO/plan files. Do not edit files during setup.",
+    "2. Propose the whole configuration in one message: goal, mode, lane, scope, metric name and direction, acceptance mode, verify command, guard command, prompt verifier, acceptance policy, stop condition, and rollback safety. Mark every value you derived rather than were told, so the user can correct it in one reply.",
+    "3. Ask a clarification round only when one of these is true: the scan found no command that produces a metric; more than one plausible metric source exists and picking wrong would waste the run; or a proposed command is destructive or otherwise unsafe. Otherwise do not ask questions — propose defaults and let the user correct them.",
+    "4. Wait for one approval. Any reply that accepts or corrects the proposal is the approval; only a question or a refusal is not.",
+    "5. After approval, call multiloop_start with the confirmed config and continue autonomously until stopped, paused, completed, or blocked. Do not ask another question unless a true safety blocker appears.",
+    "6. For punchlists, default to acceptanceMode=log with open_or_partial_items lower-is-better progress; use keep-revert only when the user confirms a metric optimization goal plus rollback safety.",
+    "7. For compound goals such as performance improves while output remains correct, configure a metric verify command plus mechanical/prompt checks. Acceptance is: metric improves and every check passes.",
     "",
-    "Confirmation format:",
+    "If the request needs no metric and no verify command, it is a quick goal, not a measured run: tell the user to run /goal <objective> instead, which starts immediately with no setup.",
+    "",
+    "Proposal format:",
     "**Proposed loop**",
     "- Target: ...",
     "- Metric: ... (direction: lower/higher; acceptance mode: log/keep-revert)",
@@ -282,9 +442,6 @@ export function buildSetupGuidePrompt(goalSeed?: string): string {
     "- Guard/checks: `...` plus prompt verifier if needed",
     "- Scope/lane: ...",
     "- Stop condition: ...",
-    "",
-    "**Need to confirm**",
-    "- Only genuine blockers or choices.",
     "",
     "**Next step**",
     "- Reply go to start, or tell me what to change.",
@@ -382,8 +539,10 @@ export function formatLoopStatusOverview(
   if (attachedRunning.length > 0) {
     lines.push("", "Attached running loops:");
     for (const state of attachedRunning) {
-      lines.push(`  - ${state.lane}/${state.runTag} (${state.mode}, ${state.iteration} iter, ${formatActionCounters(state)})`);
+      const kind = isQuickGoal(state) ? "goal" : state.mode;
+      lines.push(`  - ${state.lane}/${state.runTag} (${kind}, ${state.iteration} iter, ${formatActionCounters(state)})`);
       if (state.goal) lines.push(`    ${truncateDisplay(state.goal, 80)}`);
+      lines.push(`    ${formatAccounting(readAccounting(state), state.tokenBudget)}`);
     }
   }
 
@@ -648,16 +807,21 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_start", async () => {
     agentRunning = true;
+    turnStartedAt = Date.now();
+    toolCallsThisTurn = 0;
   });
 
-  pi.on("session_before_compact", async (_event, ctx) => {
+  pi.on("tool_call", async () => {
+    toolCallsThisTurn += 1;
+    toolCallsSinceContinuation += 1;
+  });
+
+  pi.on("session_before_compact", async (event, _ctx) => {
     pendingCompactionResumeTiming = decideCompactionResumeTiming({
       hasRunningStates: runningStates().length > 0 && loopTurnActive,
       agentRunning,
-      isIdle: ctx.isIdle(),
-      now: Date.now(),
-      lastActiveAgentEndAt,
-      lastInputAt,
+      reason: compactionReason(event),
+      willRetry: compactionWillRetry(event),
     });
   });
 
@@ -665,10 +829,8 @@ export default function (pi: ExtensionAPI) {
     const timing = pendingCompactionResumeTiming ?? decideCompactionResumeTiming({
       hasRunningStates: runningStates().length > 0 && loopTurnActive,
       agentRunning,
-      isIdle: ctx.isIdle(),
-      now: Date.now(),
-      lastActiveAgentEndAt,
-      lastInputAt,
+      reason: compactionReason(event),
+      willRetry: compactionWillRetry(event),
     });
     pendingCompactionResumeTiming = undefined;
 
@@ -685,13 +847,33 @@ export default function (pi: ExtensionAPI) {
     queueCompactionResume(pi, ctx, event.compactionEntry.id);
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("agent_end", async (event, ctx) => {
     const endedLoopTurn = loopTurnActive;
     const endedLoopReason = loopTurnReason ?? "loop-turn";
     if (runningStates().length > 0 && endedLoopTurn) {
       lastActiveAgentEndAt = Date.now();
     }
     agentRunning = false;
+
+    const elapsedSeconds = turnStartedAt > 0 ? Math.round((Date.now() - turnStartedAt) / 1000) : 0;
+    turnStartedAt = 0;
+    const turnToolCalls = toolCallsThisTurn;
+    toolCallsThisTurn = 0;
+    accountTurn(ctx, collectAssistantUsage(event.messages ?? []), elapsedSeconds, turnToolCalls);
+
+    for (const state of runningStates()) {
+      if (!budgetExhausted(state)) continue;
+      const id: LaneId = { lane: state.lane, runTag: state.runTag };
+      pauseLoop(ctx, id);
+      ctx.ui.notify(
+        [
+          `Paused ${formatLaneId(id)}: token budget reached.`,
+          `  ${formatAccounting(readAccounting(state), state.tokenBudget)}`,
+          `  Raise or clear it with /goal tokens <N|off>, then /multiloop resume ${formatLaneId(id)}.`,
+        ].join("\n"),
+        "warning"
+      );
+    }
 
     if (resumeAfterCompact) {
       const compactionEntryId = lastCompactionEntryId;
@@ -706,9 +888,30 @@ export default function (pi: ExtensionAPI) {
     loopTurnActive = false;
     loopTurnReason = undefined;
 
-    if (endedLoopTurn) {
-      queueLoopAutoContinue(pi, ctx, endedLoopReason);
+    if (!endedLoopTurn) return;
+
+    // pi-tasks drives the next turn when its automatic mode already queued
+    // work; two continuations for one turn would duplicate it.
+    if (cascadingTasksWillDrive(ctx)) return;
+
+    // A continuation that produced no tool calls is not making progress.
+    // Pause rather than spend another turn on the same prompt.
+    if (continuationsQueued > 0 && toolCallsSinceContinuation === 0) {
+      continuationsQueued = 0;
+      const stalled = runningStates();
+      for (const state of stalled) {
+        pauseLoop(ctx, { lane: state.lane, runTag: state.runTag });
+      }
+      if (stalled.length > 0) {
+        ctx.ui.notify(
+          `Paused ${stalled.map((state) => `${state.lane}/${state.runTag}`).join(", ")}: the last continuation made no tool calls. Resume with /multiloop resume <lane/run-tag>.`,
+          "warning"
+        );
+      }
+      return;
     }
+
+    queueLoopAutoContinue(pi, ctx, endedLoopReason);
   });
 
   interface StartLoopConfig {
@@ -716,7 +919,9 @@ export default function (pi: ExtensionAPI) {
     runTag?: string;
     mode: LoopMode;
     goal: string;
-    verifyCommand: string;
+    kind?: "goal" | "measured";
+    tokenBudget?: number;
+    verifyCommand?: string;
     guardCommand?: string;
     promptVerifier?: string;
     acceptancePolicy?: string;
@@ -733,6 +938,8 @@ export default function (pi: ExtensionAPI) {
         ? "metric must improve and all mechanical/prompt verification checks must pass"
         : undefined);
     const state = createInitialState(id, config.mode, config.verifyCommand, {
+      kind: config.kind,
+      tokenBudget: config.tokenBudget,
       guardCommand: config.guardCommand,
       promptVerifier: config.promptVerifier,
       acceptancePolicy,
@@ -769,7 +976,7 @@ export default function (pi: ExtensionAPI) {
   function buildLoopStartPrompt(state: LoopState): string {
     return [
       `New ${state.mode} loop started: ${formatLaneId({ lane: state.lane, runTag: state.runTag })}`,
-      `Verify: \`${state.verifyCommand}\``,
+      state.verifyCommand ? `Verify: \`${state.verifyCommand}\`` : null,
       state.guardCommand ? `Guard: \`${state.guardCommand}\`` : null,
       state.promptVerifier ? `Prompt verifier: ${state.promptVerifier}` : null,
       state.acceptancePolicy ? `Acceptance: ${state.acceptancePolicy}` : null,
@@ -792,7 +999,7 @@ export default function (pi: ExtensionAPI) {
       Type.Literal("dev"),
     ], { description: "Loop mode selected by the setup guide" }),
     goal: Type.String({ description: "Confirmed user goal" }),
-    verifyCommand: Type.String({ description: "Command that produces the primary metric" }),
+    verifyCommand: Type.Optional(Type.String({ description: "Command that produces the primary metric. Omit only for a run with no metric, which then converges on a completion audit instead of a threshold." })),
     runTag: Type.Optional(Type.String({ description: "Run tag (auto-generated if omitted)" })),
     guardCommand: Type.Optional(Type.String({ description: "Optional pass/fail guard command" })),
     promptVerifier: Type.Optional(Type.String({ description: "Optional prompt-based correctness verifier / review criterion" })),
@@ -880,7 +1087,7 @@ export default function (pi: ExtensionAPI) {
             ? `Current ${state.metricName ?? "metric"}: ${state.currentMetric}`
             : `No baseline yet — this iteration will establish it.`,
           params.hypothesis ? `Hypothesis: ${params.hypothesis}` : "",
-          `Run verify command: \`${state.verifyCommand}\``,
+          state.verifyCommand ? `Run verify command: \`${state.verifyCommand}\`` : "",
           state.guardCommand ? `Then run guard: \`${state.guardCommand}\`` : "",
           state.promptVerifier ? `Then run prompt verifier: ${state.promptVerifier}` : "",
           state.guardCommand || state.promptVerifier
@@ -1498,6 +1705,307 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
+  // ── Quick goal ─────────────────────────────────────────────────────────────
+
+  /** The attached quick goal, if one is running or paused in this session. */
+  function attachedQuickGoal(): LoopState | null {
+    for (const state of activeStates.values()) {
+      if (isQuickGoal(state) && (state.status === "running" || state.status === "paused")) return state;
+    }
+    return null;
+  }
+
+  function goalId(state: LoopState): LaneId {
+    return { lane: state.lane, runTag: state.runTag };
+  }
+
+  function takenLanes(ctx: ExtensionContext | ExtensionCommandContext): string[] {
+    return readRegistry(ctx.cwd).loops.map((loop) => loop.lane);
+  }
+
+  /** User-facing goal status. Never sent to the model. */
+  function formatGoalStatus(state: LoopState): string {
+    const accounting = readAccounting(state);
+    return [
+      `Goal ${state.lane}/${state.runTag} — ${state.status}`,
+      `  ${state.goal ?? "(no objective recorded)"}`,
+      `  mode ${state.mode}, ${state.iteration} recorded step${state.iteration === 1 ? "" : "s"}`,
+      `  ${formatAccounting(accounting, state.tokenBudget)}`,
+    ].join("\n");
+  }
+
+  function startQuickGoal(
+    ctx: ExtensionCommandContext,
+    objective: string,
+    tokenBudget: number | undefined
+  ): LoopState {
+    const mode = deriveGoalMode(objective);
+    const state = startLoop(ctx, {
+      lane: deriveLane(objective, takenLanes(ctx)),
+      mode,
+      goal: objective,
+      kind: "goal",
+      tokenBudget,
+    });
+
+    ctx.ui.notify(
+      [
+        `Goal started: ${state.lane}/${state.runTag} (${mode})`,
+        `  ${objective}`,
+        tokenBudget === undefined ? undefined : `  token budget ${formatTokenCount(tokenBudget)}`,
+        `  /goal pause to hold it, /goal to see progress, /multiloop stop ${state.lane}/${state.runTag} to end it.`,
+      ]
+        .filter((line): line is string => line !== undefined)
+        .join("\n"),
+      "info"
+    );
+
+    markLoopTurn("goal-start");
+    continuationsQueued = 0;
+    toolCallsSinceContinuation = 0;
+    pi.sendUserMessage(
+      buildQuickGoalStartPrompt({ lane: state.lane, runTag: state.runTag, objective }),
+      { deliverAs: "followUp" }
+    );
+    return state;
+  }
+
+  /** Reasons a goal may not be marked complete yet. */
+  function completionBlocker(ctx: ExtensionContext, state: LoopState): string | null {
+    if (state.allowOpenTasks === true) return null;
+    const snapshot = taskSnapshotFor(ctx);
+    if (snapshot === null || snapshot.open.length === 0) return null;
+    return `The task list still has ${snapshot.open.length} open task${snapshot.open.length === 1 ? "" : "s"}. Finish or remove them, or the user can allow completion with /goal allow-open-tasks on.`;
+  }
+
+  function completeGoal(ctx: ExtensionContext, state: LoopState): string {
+    const id = goalId(state);
+    state.status = "completed";
+    saveState(ctx.cwd, id, state);
+    updateLoopStatus(ctx.cwd, id, "completed");
+    activeStates.delete(stateKey(id));
+    updateStatus(ctx);
+    ctx.ui.notify(
+      [`Goal complete: ${state.lane}/${state.runTag}`, `  ${state.goal ?? ""}`, `  ${formatAccounting(readAccounting(state), state.tokenBudget)}`].join("\n"),
+      "info"
+    );
+    return `Goal ${state.lane}/${state.runTag} marked complete.`;
+  }
+
+  pi.registerTool({
+    name: "get_goal",
+    label: "Get Goal",
+    description:
+      "Read the active quick goal for this session: its objective, status, and whether anything is blocking completion. Use it to confirm what you are working toward.",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const goal = attachedQuickGoal();
+      if (!goal) return textResult("No quick goal is active. The user starts one with /goal <objective>.");
+      const blocker = completionBlocker(ctx, goal);
+      return textResult(
+        [
+          `Objective: ${goal.goal ?? ""}`,
+          `Run: ${goal.lane}/${goal.runTag}`,
+          `Status: ${goal.status}`,
+          blocker ? `Completion blocked: ${blocker}` : "Completion gate: clear.",
+        ].join("\n")
+      );
+    },
+  });
+
+  pi.registerTool({
+    name: "update_goal",
+    label: "Update Goal",
+    description:
+      'Mark the active quick goal complete.\nUse this only after the completion audit shows the objective has actually been achieved and no required work remains.\nDo not mark a goal complete because you are stopping work or running out of ideas.\nYou cannot pause, resume, or restart a goal with this tool; those are the user\'s to make.',
+    parameters: Type.Object({
+      status: Type.Literal("complete", { description: 'Only "complete" is accepted.' }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (params.status !== "complete") {
+        return textResult("update_goal can only mark the goal complete; pause and resume are controlled by the user.");
+      }
+      const goal = attachedQuickGoal();
+      if (!goal) return textResult("No quick goal is active, so there is nothing to complete.");
+      if (goal.status !== "running") {
+        return textResult(`Goal ${goal.lane}/${goal.runTag} is ${goal.status}; only a running goal can be completed.`);
+      }
+      const blocker = completionBlocker(ctx, goal);
+      if (blocker) return textResult(`Not marking the goal complete. ${blocker}`);
+      return textResult(completeGoal(ctx, goal));
+    },
+  });
+
+  pi.registerCommand("goal", {
+    description: "Set one objective and work toward it; a lightweight multiloop run",
+    async handler(args, ctx) {
+      const command = parseGoalCommand(args);
+      if (command.kind === "error") {
+        ctx.ui.notify(command.message, "error");
+        return;
+      }
+
+      const goal = attachedQuickGoal();
+
+      switch (command.kind) {
+        case "help":
+          pi.sendMessage({
+            customType: "multiloop-help",
+            content: [
+              "/goal — set one objective and work toward it.",
+              "",
+              "  /goal <objective>            Start working now. Lane, mode, and scope are derived for you.",
+              "  /goal --tokens 50k <obj>     Same, with a token cap that pauses the run when reached.",
+              "  /goal                        Show the active goal and what it has cost.",
+              "  /goal pause | resume         Hold the goal, or pick it back up.",
+              "  /goal clear                  Detach the goal. Its history stays in .multiloop/.",
+              "  /goal tokens <N|off>         Change or remove the token cap.",
+              "  /goal allow-open-tasks <on|off>   Allow completion while tasks are still open.",
+              "",
+              "A goal is an ordinary multiloop run, so /multiloop ls, status, resume, and archive all work on it.",
+              "For measured work with a metric and a verify command, use /multiloop instead.",
+            ].join("\n"),
+            display: true,
+          });
+          return;
+
+        case "show":
+          if (!goal) {
+            ctx.ui.notify("No goal is active. Start one with /goal <objective>.", "info");
+            return;
+          }
+          ctx.ui.notify(formatGoalStatus(goal), "info");
+          return;
+
+        case "setObjective": {
+          let objective: string;
+          try {
+            objective = validateObjective(command.objective);
+          } catch (err) {
+            ctx.ui.notify((err as Error).message, "error");
+            return;
+          }
+
+          if (goal) {
+            // Replacing a goal must show what is being replaced, not just what
+            // is proposed, and must never make the existing run disappear.
+            const choice = ctx.hasUI
+              ? await ctx.ui.select(
+                  [
+                    "A goal is already active.",
+                    "",
+                    formatGoalStatus(goal),
+                    "",
+                    `Proposed objective: ${objective}`,
+                  ].join("\n"),
+                  ["Pause current and start the new goal", "Stop current and start the new goal", "Keep the current goal"]
+                )
+              : "Pause current and start the new goal";
+            if (choice === "Keep the current goal" || choice === undefined) {
+              ctx.ui.notify("Kept the current goal.", "info");
+              return;
+            }
+            const disposition = choice.startsWith("Stop") ? stopLoop(ctx, goalId(goal)) : pauseLoop(ctx, goalId(goal));
+            ctx.ui.notify(`${disposition} Its history stays in .multiloop/.`, "info");
+          }
+
+          startQuickGoal(ctx, objective, command.tokenBudget);
+          return;
+        }
+
+        case "setStatus": {
+          if (!goal) {
+            ctx.ui.notify("No goal is active. Start one with /goal <objective>.", "info");
+            return;
+          }
+          if (command.status === "paused") {
+            ctx.ui.notify(pauseLoop(ctx, goalId(goal)), "info");
+            return;
+          }
+          const resumed = resumeLoop(ctx, goalId(goal));
+          if (!resumed) {
+            ctx.ui.notify(`No state found for ${formatLaneId(goalId(goal))}.`, "error");
+            return;
+          }
+          ctx.ui.notify(`Resumed goal ${resumed.lane}/${resumed.runTag}.`, "info");
+          markLoopTurn("goal-resume");
+          continuationsQueued = 0;
+          toolCallsSinceContinuation = 0;
+          pi.sendUserMessage(buildAutoContinuePrompt([resumed], taskSnapshotFor(ctx)), { deliverAs: "followUp" });
+          return;
+        }
+
+        case "clear": {
+          if (!goal) {
+            ctx.ui.notify("No goal is active.", "info");
+            return;
+          }
+          const id = goalId(goal);
+          activeStates.delete(stateKey(id));
+          updateStatus(ctx);
+          ctx.ui.notify(
+            `Detached goal ${formatLaneId(id)}. Its state and history stay in .multiloop/; resume it with /multiloop resume ${formatLaneId(id)}.`,
+            "info"
+          );
+          return;
+        }
+
+        case "showBudget":
+          if (!goal) {
+            ctx.ui.notify("No goal is active. Start one with /goal <objective>.", "info");
+            return;
+          }
+          ctx.ui.notify(
+            goal.tokenBudget === undefined
+              ? `No token cap on ${goal.lane}/${goal.runTag}. Set one with /goal tokens <N>.`
+              : `${goal.lane}/${goal.runTag}: ${formatAccounting(readAccounting(goal), goal.tokenBudget)}`,
+            "info"
+          );
+          return;
+
+        case "setBudget": {
+          if (!goal) {
+            ctx.ui.notify("No goal is active. Start one with /goal <objective>.", "info");
+            return;
+          }
+          goal.tokenBudget = command.tokenBudget ?? undefined;
+          saveState(ctx.cwd, goalId(goal), goal);
+          ctx.ui.notify(
+            command.tokenBudget === null
+              ? `Removed the token cap on ${goal.lane}/${goal.runTag}.`
+              : `Token cap for ${goal.lane}/${goal.runTag}: ${formatTokenCount(command.tokenBudget)}.`,
+            "info"
+          );
+          return;
+        }
+
+        case "showAllowOpenTasks":
+          if (!goal) {
+            ctx.ui.notify("No goal is active. Start one with /goal <objective>.", "info");
+            return;
+          }
+          ctx.ui.notify(
+            goal.allowOpenTasks === true
+              ? "allow-open-tasks: on — the goal can be completed while tasks are still open."
+              : "allow-open-tasks: off — completion waits until the task list has no open tasks.",
+            "info"
+          );
+          return;
+
+        case "setAllowOpenTasks": {
+          if (!goal) {
+            ctx.ui.notify("No goal is active. Start one with /goal <objective>.", "info");
+            return;
+          }
+          goal.allowOpenTasks = command.value;
+          saveState(ctx.cwd, goalId(goal), goal);
+          ctx.ui.notify(`allow-open-tasks ${command.value ? "enabled" : "disabled"}.`, "info");
+          return;
+        }
+      }
+    },
+  });
+
   pi.registerCommand("multiloop", {
     description: "Start, resume, or manage autonomous iteration loops",
     async handler(args, ctx) {
@@ -1609,7 +2117,11 @@ export default function (pi: ExtensionAPI) {
         pi.sendMessage({
           customType: "multiloop-help",
           content: [
-            "pi-multiloop — run autonomous iteration loops with isolated state per lane.",
+            "pi-multiloop — run autonomous work with isolated state per lane.",
+            "",
+            "Two ways to start:",
+            "  /goal <objective>   Start working now. No setup; lane and mode are derived for you.",
+            "  /multiloop <seed>   Set up a measured run with a metric and a verify command.",
             "",
             "Modes:",
             "  optimize    Edit, measure, keep/revert. For performance tuning and benchmarks.",
@@ -1622,18 +2134,19 @@ export default function (pi: ExtensionAPI) {
             "  ls               List all loops in registry",
             "  stop [lane]      Stop active loop(s)",
             "  pause [lane]     Pause active loop(s)",
-            "  guide            Launch the setup guide for a new high-quality loop",
+            "  guide            Propose a measured run and start it on one approval",
             "  resume <id>      Resume a stopped/paused loop",
             "  archive [id]     Archive completed loops (all by default)",
             "  rm <id>          Delete a loop and its state files",
             "  help             Show this help",
             "",
-            "To start a new loop, just describe your goal after /multiloop. For example:",
+            "To start a measured run, describe the goal after /multiloop. For example:",
             '  /multiloop improve inference latency, verify: `./bench.py --quick`',
             '  /multiloop improve speed safely, verify: `./bench.py`, guard: `npm test`, prompt verifier: `Check output semantics against fixtures.`',
             "",
-            "If you need help setting one up, just ask — describe what you want to",
-            "optimize, research, or build and the agent will configure the loop for you.",
+            "The agent scans the repo, proposes the whole configuration once, and starts",
+            "on your approval. If the work has no metric to measure, use /goal instead —",
+            "it starts immediately. Run /goal help for its commands.",
           ].join("\n"),
           display: true,
         });
