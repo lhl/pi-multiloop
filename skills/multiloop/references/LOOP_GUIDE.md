@@ -1,6 +1,8 @@
 # pi-multiloop Loop Setup Guide
 
-Use this guide whenever a user wants to create a new autonomous loop but has not already provided a complete launch config.
+Use this guide when a user wants a **measured** run — one with a metric and a command that verifies it — and has not already provided a complete launch config.
+
+It does not apply to `/goal`. A quick goal has no metric and no verify command: it derives its own lane, mode, and scope and starts immediately. Never run this setup for a goal, and never ask a goal for launch confirmation. If a `/multiloop` request turns out to have nothing to measure, say so and point the user at `/goal <objective>`.
 
 ## Goal
 
@@ -12,15 +14,15 @@ pi-multiloop is a dev-facing tool for developers installing a loop helper into a
 
 ## Hard Rules
 
-1. **Clarify before launch.** Always scan the repo and ask at least one repo-grounded clarification round before starting a new loop.
+1. **Scan before proposing.** Read the repo first so the proposal is grounded in what is actually there.
 2. **No edits during setup.** Reading files and running harmless discovery commands is allowed; code changes wait until the loop is launched.
-3. **Propose defaults.** Ask concrete questions with suggested defaults rather than open-ended forms.
-4. **Confirm before `multiloop_start`.** Present a short summary and wait for an explicit `go`, `start`, or `launch` before calling `multiloop_start`.
-5. **Two-phase launch boundary.** All clarification happens before explicit launch approval. After approval, the loop continues autonomously until stopped, paused, completed, or blocked.
+3. **Propose the whole configuration once.** One message covering every field below, with derived values marked as derived so the user can correct them in one reply. Do not walk the user through fields one at a time.
+4. **Ask only when you must.** A clarification round is warranted when the scan found no command that produces a metric, when more than one plausible metric source exists and picking wrong would waste the run, or when a proposed command is destructive or otherwise unsafe. Otherwise propose a default instead of asking.
+5. **One approval, then `multiloop_start`.** Any reply that accepts or corrects the proposal is the approval. After it, the loop continues autonomously until stopped, paused, completed, or blocked; do not ask again unless a true safety blocker appears.
 
 ## Scan Checklist
 
-Before asking the first question, inspect enough context to propose a good loop:
+Before writing the proposal, inspect enough context to make every value defensible:
 
 - repository structure and likely scope;
 - manifest/build files (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, etc.);
@@ -77,16 +79,16 @@ During runtime, the agent must pass check verdicts to `multiloop_measure.checks`
 
 ## Clarification Examples
 
-Prefer one compact round with defaults and multiple-choice options:
+When a clarification round is warranted, keep it to one compact message with defaults and multiple-choice options:
 
 - “I found `scripts/bench.py` and `npm test`. Metric choice: A) open/partial checklist items from `docs/TODO.md` (lower is better, recommended), B) benchmark latency from `scripts/bench.py`, or C) another metric?”
 - “Guard choice: A) `npm test` (recommended), B) no guard, or C) a different command?”
 - “Prompt verifier choice: A) ‘compare generated output with the baseline fixture and pass only if semantics are unchanged’, B) no prompt verifier, or C) a different criterion?”
 - “Stop choice: A) until all TODO items are checked, B) cap at 10 iterations, or C) stop on a specific metric threshold?”
 
-## Confirmation Summary
+## Proposal Format
 
-Before launch, show a concise summary:
+Show the whole configuration once. Mark derived values so the user can correct them in the same reply that approves the rest:
 
 ```markdown
 **Proposed loop**
@@ -99,18 +101,17 @@ Before launch, show a concise summary:
 - Acceptance: metric improves and all checks pass
 - Stop: ...
 
-**Need to confirm**
-- Only genuine blockers or choices.
-
 **Next step**
 Reply `go` to start, or tell me what to change.
 ```
 
+Add a **Need to confirm** section only when rule 4 applies. An empty one invites a round trip that the run does not need.
+
 ## Launch Handoff
 
-After explicit approval, call `multiloop_start` with the confirmed config. Do not ask the user to paste a generated command unless tool calling is unavailable.
+After approval, call `multiloop_start` with the confirmed config. Do not ask the user to paste a generated command unless tool calling is unavailable.
 
-Minimum `multiloop_start` config:
+Minimum `multiloop_start` config for a measured run:
 
 - `lane`
 - `mode`
@@ -119,3 +120,5 @@ Minimum `multiloop_start` config:
 - `metricDirection`
 
 Add `guardCommand`, `promptVerifier`, `acceptancePolicy`, `metricName`, and `scope` when known.
+
+`verifyCommand` is optional in the tool schema because quick goals omit it. Do not omit it here: a measured run without a verify command has nothing to measure, and the user should have been sent to `/goal` instead.

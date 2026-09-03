@@ -53,8 +53,17 @@ The snapshot also records iteration metrics:
 - `bestMetric`: best kept metric.
 - `consecutiveFailures`: count used for escalation.
 - `pivotCount`: number of pivots used.
-- `verifyCommand` / `guardCommand`: commands the loop should run.
+- `verifyCommand` / `guardCommand`: commands the loop should run. `verifyCommand` is absent on a quick goal, which has no metric.
 - `activeIteration`: optional marker for the next iteration when it has started or has measured-but-not-decided results, including recorded mechanical/prompt checks and the acceptance verdict.
+
+It also records how the run was launched and what it has cost:
+
+- `kind`: `"goal"` for a `/goal` run, `"measured"` otherwise. A snapshot written before this field existed is a measured run.
+- `tokenBudget`: optional cumulative cap. Reaching it pauses the run.
+- `allowOpenTasks`: when true, completion bypasses the open-task gate. User-owned.
+- `accounting`: `activeSeconds`, `turns`, `toolCalls`, `inputTokens`, `outputTokens`.
+
+`accounting` is reported to the user in `/multiloop status`, `/goal`, and end-of-run notices. It is never placed in a prompt, resume prompt, tool result, or tool description: it measures cumulative work rather than context occupancy, and a running total delivered every turn reads as a context-window gauge. `tests/accounting.test.ts` asserts this over every model-facing prompt builder.
 
 ### Append-only result state
 
@@ -106,18 +115,29 @@ This is global to the Pi session. pi-multiloop currently has no per-loop turn ow
 
 ### Start: `/multiloop <goal>`
 
-1. Detect mode and lane.
-2. Generate run tag.
-3. Create `.multiloop/active/<lane>/<runTag>/state.json` with status `running`.
-4. Register loop in `.multiloop/registry.json` with status `active`.
-5. Add state to `activeStates`.
-6. Send a steer prompt telling the agent to establish a baseline and begin iterating.
+1. Scan the repo and propose the configuration once; start on one approval.
+2. Detect mode and lane.
+3. Generate run tag.
+4. Create `.multiloop/active/<lane>/<runTag>/state.json` with status `running` and `kind: "measured"`.
+5. Register loop in `.multiloop/registry.json` with status `active`.
+6. Add state to `activeStates`.
+7. Send a steer prompt telling the agent to establish a baseline and begin iterating.
 
 Result:
 
 - Registry: `active`
 - Snapshot: `running`
 - Runtime: attached/running
+
+### Start: `/goal <objective>`
+
+1. Derive the lane from the objective, suffixing on collision, and the mode from its wording (default `dev`).
+2. Generate run tag.
+3. Create the same state file with `kind: "goal"`, no `verifyCommand`, and `acceptanceMode: "log"`.
+4. Register and attach exactly as above.
+5. Send a start prompt carrying the objective as untrusted data, with no setup interview and no launch confirmation.
+
+There is no separate goal store. A quick goal is a run, so `ls`, `status`, `resume`, `pause`, `stop`, `archive`, and `rm` all apply. `/goal clear` detaches the run and leaves its state and history on disk.
 
 ### Explicit resume: `/multiloop resume <lane/run-tag>`
 
@@ -294,25 +314,23 @@ The extension event does not expose the compaction reason. `session_before_compa
 
 ### Current pi-multiloop behavior
 
-Current code uses these pieces of state:
+`decideCompactionResumeTiming` reads Pi's reported compaction cause. It uses:
 
 - `agentRunning`
-- `resumeAfterCompact`
-- `lastCompactionEntryId`
-- `pendingCompactionResumeTiming`
-- `lastActiveAgentEndAt`
-- `lastInputAt`
 - `loopTurnActive` / `loopTurnReason`
-- a 5 second recent window
+- `reason` (`manual`, `threshold`, or `overflow`) from the compaction event
+- `willRetry` from the compaction event
+- `resumeAfterCompact` / `lastCompactionEntryId` to defer a resume past the current turn
 
-The intent is:
+The policy is:
 
-- if compaction happens during a loop-owned active agent turn, resume after `agent_end`;
-- if Pi threshold-compacts immediately after a loop-owned turn, resume after `session_compact`;
-- if compaction is pre-prompt, skip because the submitted prompt will continue normally;
-- if manual idle `/compact`, skip.
+- no attached running loop: skip;
+- `willRetry`: skip, because overflow recovery re-runs the aborted turn itself;
+- `manual` while the agent is idle: skip, because the user asked to compact, not to restart the loop;
+- agent still running: resume after `agent_end`;
+- otherwise: resume after `session_compact`.
 
-The weak part is the time-based classification. A bare manual `/compact` soon after an active loop turn can look like auto threshold compaction.
+Through 0.3.3 this was inferred from timing — a five-second window over `lastActiveAgentEndAt` and `lastInputAt` — which could not distinguish a bare manual `/compact` shortly after a loop turn from automatic threshold compaction. Pi now reports the cause directly, so the window is gone.
 
 ## Is a user typing into a non-moving loop inactive?
 
@@ -363,59 +381,23 @@ Ways to clear it:
 - when the loop is paused/stopped/archived/deleted;
 - after a compaction resume prompt is sent or intentionally skipped.
 
-## Best compaction fix: expose reason upstream
+## Compaction reason, as shipped
 
-The best solution is an upstream Pi extension API change: expose compaction `reason` on `session_before_compact` and `session_compact`.
-
-Pi core already knows this reason internally:
-
-- `manual`: user invoked `/compact`.
-- `threshold`: automatic compaction because context crossed the configured threshold.
-- `overflow`: automatic recovery after a provider context-overflow error.
-
-Today that reason is emitted on Pi's lower-level session stream, but it is not passed through to extension compaction events. That forces pi-multiloop to guess using timing, `agentRunning`, `lastInputAt`, and `customInstructions`.
-
-The upstream API should look roughly like:
+Pi exposes the compaction cause on both `session_before_compact` and `session_compact`:
 
 ```ts
 type CompactionReason = "manual" | "threshold" | "overflow";
 
 session_before_compact.reason: CompactionReason
+session_before_compact.willRetry: boolean
 session_compact.reason: CompactionReason
+session_compact.willRetry: boolean
 ```
 
-Implementation shape in Pi core:
+- `manual`: the user invoked `/compact` or an extension requested compaction.
+- `threshold`: automatic compaction because context crossed the configured threshold.
+- `overflow`: automatic recovery after a provider context-overflow error. `willRetry` is set when the aborted turn will be re-run.
 
-- In manual `AgentSession.compact(customInstructions)`, emit extension events with `reason: "manual"`.
-- In `_runAutoCompaction(reason, willRetry)`, forward the existing `reason` argument into both extension events.
-- Update extension event TypeScript definitions and docs.
+pi-multiloop reads both fields through `compactionReason()` and `compactionWillRetry()`, which fall back to `undefined`/`false` on a harness that does not supply them. With no reason available and the agent between turns, the policy resumes; that matches the old heuristic's most common case without the timing guess.
 
-Then pi-multiloop can define policy directly:
-
-- `threshold` or `overflow` during/following a loop-owned turn: resume;
-- `manual`: usually do not auto-resume unless the user explicitly asks;
-- `manual` with custom instructions: never auto-resume unless those instructions request it.
-
-This is cleaner than monkeypatching Pi internals or installing another `@mariozechner/pi-coding-agent` copy inside pi-multiloop. The active harness is the global `pi` CLI process; a package dependency copy would not change its runtime behavior. A monkeypatch may be possible for local experiments, but it would rely on private paths/prototypes and should not be pi-multiloop's shipped solution.
-
-## Manual compaction mitigation ideas
-
-A secondary sanity check would be to keep the last submitted user command and suppress auto-resume when it is `/compact` or starts with `/compact `. This would work only if Pi exposes built-in slash-command submissions to extensions, or if extension `input` starts firing before built-in command handling. In current interactive flow, built-in `/compact` is handled before `AgentSession.prompt()`, so pi-multiloop's `input` handler likely cannot see bare `/compact` today.
-
-A partial check available today:
-
-- If `session_before_compact.customInstructions` is defined, treat it as manual and suppress compaction resume.
-- This does not catch bare `/compact`.
-
-## Proposed compaction policy
-
-A less surprising policy than the current 5 second heuristic:
-
-1. Resume only if there is at least one attached/running loop.
-2. Resume if compaction happened while `agentRunning === true` and the turn was loop-owned.
-3. Resume if Pi emits threshold/overflow compaction immediately after a loop-owned `agent_end` and no normal user input happened in between.
-4. Do not resume for known manual compaction.
-5. Do not resume if there are pending user messages.
-6. If classification is ambiguous, prefer not to auto-resume and leave the loop attached/running for explicit `/multiloop status` or `/multiloop resume` guidance.
-
-This moves pi-multiloop from timing guesses toward explicit ownership and user-control boundaries.
+Requesting compaction is a separate concern. pi-multiloop does not request it, and Pi's `AgentSession.compact()` aborts the running turn before compacting, so an extension that wants to request one must defer the call until the turn has settled.

@@ -26,8 +26,10 @@ Pi extension for multi-lane autonomous iteration loops. Supports optimization, p
 | `extensions/pi-multiloop/metrics.ts` | Metric parsing and MAD confidence scoring |
 | `extensions/pi-multiloop/loop.ts` | Core iterate/keep/revert/escalation engine |
 | `extensions/pi-multiloop/modes.ts` | Mode definitions and punchlist parser |
+| `extensions/pi-multiloop/goal.ts` | Quick-goal parsing, lane/mode derivation, and goal prompts |
+| `extensions/pi-multiloop/tasks.ts` | pi-tasks store discovery and snapshot formatting (read-only) |
 | `extensions/pi-multiloop/ui.ts` | TUI dashboard widget |
-| `skills/multiloop/SKILL.md` | Setup wizard skill prompt |
+| `skills/multiloop/SKILL.md` | Quick-goal and measured-setup skill prompt |
 | `docs/PLAN.md` | North stars, gap analysis, implementation checklist |
 
 ## Architecture

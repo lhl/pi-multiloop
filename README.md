@@ -1,13 +1,23 @@
 # pi-multiloop
 
-An autoloop/autoresearch extension for [Pi](https://pi.dev) coding agent that lets you run multiple loops in the same worktree with isolated state per lane.
+An autoloop/autoresearch extension for [Pi](https://pi.dev) coding agent that lets you run multiple loops in the same worktree with isolated state per lane, plus a one-command `/goal` for work that has no metric.
 
 ## Why
 
 Other loop extensions only support one loop per session or worktree. If you're tuning a CUDA kernel and sweeping quantization parameters at the same time, those experiments touch different files but share the same build artifacts. pi-multiloop lets each loop have its own lane with independent state, so you don't need extra worktrees or branches.
 
+## Two ways to start
+
+| Command | Use it for | Setup |
+| --- | --- | --- |
+| `/goal <objective>` | One objective with no metric — fix this, finish that, work through this problem | None. The lane, mode, and scope are derived and work starts immediately. |
+| `/multiloop <goal>` | Repeated measured improvement against a number | One repo scan, one proposal, one approval. |
+
+Both create ordinary runs under `.multiloop/`, so `ls`, `status`, `resume`, `pause`, `stop`, and `archive` work on either.
+
 ## Features
 
+- **Quick goals** — `/goal fix the flaky Windows install` starts working now; no metric, no verify command, no setup questions
 - **Multi-loop isolation** — run multiple loops on the same worktree, each with its own lane and state
 - **Four modes** — flexibly supports different types of loops:
   - **Optimize** — the classic edit, measure, keep/revert cycle
@@ -21,6 +31,7 @@ Other loop extensions only support one loop per session or worktree. If you're t
 - **Mechanical continuation** — loop-owned turns automatically queue the next required action while the loop remains running, while still allowing brief answers to user status questions
 - **Compaction-aware resume** — when pi auto-compacts during a loop explicitly started or resumed in the current session, pi-multiloop injects a loop-aware resume prompt after the interrupted turn ends
 - **Escalation** — refines strategy automatically after consecutive failures
+- **Work accounting** — every run records elapsed time, turns, tool calls, and token totals, reported in status views and when a run ends
 - **Pi-native status surfaces** — footer status, resumable-loop notices, and `/multiloop status` / `/multiloop ls` views
 
 ## Install
@@ -29,9 +40,25 @@ Other loop extensions only support one loop per session or worktree. If you're t
 pi install npm:pi-multiloop
 ```
 
-The package registers the `multiloop` setup skill. Pi loads its repository scan, clarification, launch, measurement, and continuation rules on demand.
+The package registers the `multiloop` skill. Pi loads its quick-goal, repository-scan, launch, measurement, and continuation rules on demand.
 
 ## Quick Start
+
+```bash
+# Set one objective and start working. No setup questions, no launch confirmation.
+/goal fix the flaky Windows install
+
+# Same, with a token cap that pauses the run when it is reached.
+/goal --tokens 200k port the remaining tests to vitest
+
+# Show the active goal and what it has cost so far.
+/goal
+
+# Hold it, pick it back up, or let it go (its history stays on disk).
+/goal pause
+/goal resume
+/goal clear
+```
 
 ```bash
 # Show current loop state. If there is no existing loop state, this launches the setup guide.
@@ -39,10 +66,10 @@ The package registers the `multiloop` setup skill. Pi loads its repository scan,
 
 # Explicitly launch the setup guide for a new loop.
 /multiloop guide
-# The guide scans the repo, proposes verify/guard/checks, asks for confirmation,
+# The guide scans the repo, proposes the whole configuration once,
 # then starts the loop after you reply "go".
 
-# Seed the guide with a natural-language goal. This does not bypass scan/clarify/confirm.
+# Seed the guide with a natural-language goal. The agent still scans the repo and proposes before starting.
 /multiloop improve inference latency, verify likely ./bench.py --quick
 
 # Seed a compound verifier loop: metric + mechanical correctness + prompt review.
@@ -80,6 +107,23 @@ Pick a task, implement, test, commit. General development with iteration trackin
 
 ### Punchlist
 Parse a markdown checklist, pick the next open (`[ ]`) or partial (`[~]`) item, implement, verify, and check it off (`[x]`) or leave it partial with a reason. Punchlist loops default to log/progress acceptance using the `open_or_partial_items` metric; use keep/revert only for explicit metric optimization goals.
+
+`/goal` picks one of these four from the objective's wording and defaults to `dev`. The mode only shapes how the agent approaches the work — a quick goal has no metric in any mode.
+
+## Work accounting
+
+Every run records elapsed active time, turns, tool calls, and cumulative input and output tokens. `/multiloop status` and `/goal` report them, and so does the notice printed when a run pauses or completes:
+
+```
+Goal ship-installer/run-001 — running
+  fix the flaky Windows install
+  mode dev, 4 recorded steps
+  time 41m, 12 turns, 63 tool calls, 210K tokens
+```
+
+`/goal --tokens 200k <objective>` or `/goal tokens 200k` caps the total. When a run reaches its cap it pauses and tells you; raise or clear the cap with `/goal tokens <N|off>` and resume.
+
+These counters never reach the agent. They measure cumulative work, not how full the context window is, and a running total delivered on every turn reads to a model like a context gauge — enough to make one wind down work that was not finished. Pi compacts context on its own; the counters have nothing to do with it.
 
 ## Compound Verifiers
 
@@ -131,7 +175,9 @@ your-repo/
 | `results.jsonl` | Every iteration | Append-only log — one JSON line per iteration with: action (keep/revert/log/skip/crash/blocked), metric, baseline, delta, confidence, hypothesis, changes, measurements array, verification checks, and acceptance verdict. Never overwritten. |
 | `lessons.md` | On pivot escalation | Freeform notes appended when the loop pivots strategy. Carried forward to bias future hypotheses. |
 
-With existing loop state, bare `/multiloop` is status-first: it shows attached running loops, detached resumable loops, inactive/history buckets, and archived-run counts. If there is no useful existing state, bare `/multiloop` launches the setup guide. `/multiloop guide` always launches the guide explicitly. The guide scans the repo, asks at least one clarification round, proposes metric/verify/guard/checks, and starts via `multiloop_start` only after explicit approval.
+With existing loop state, bare `/multiloop` is status-first: it shows attached running loops, detached resumable loops, inactive/history buckets, and archived-run counts. If there is no useful existing state, bare `/multiloop` launches the setup guide. `/multiloop guide` always launches the guide explicitly. The guide scans the repo, proposes metric/verify/guard/checks in one message, and starts via `multiloop_start` on one approval. It asks a clarification round only when the scan found no command that produces a metric, when more than one plausible metric source exists, or when a proposed command is unsafe.
+
+`/goal` skips all of that. It derives the lane from the objective, picks the mode from its wording, and starts a `.multiloop` run with no metric and no verify command. Such a run records progress with `multiloop_log` and finishes when the agent's completion audit passes, not when a number crosses a threshold.
 
 ### Lifecycle
 
