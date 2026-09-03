@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-09-03
+
 ### Added
 - `/goal <objective>` starts an ordinary multiloop run with no setup interview and no launch confirmation. The lane comes from the objective, the mode from its wording, and the run carries no metric and no verify command; it records progress with `multiloop_log` and finishes on a completion audit. `/goal` also supports `pause`, `resume`, `clear`, `tokens <N|off>`, `allow-open-tasks <on|off>`, and `help`.
 - `get_goal` and completion-only `update_goal` tools, with a completion gate that refuses while the pi-tasks list has open tasks unless the user turned on `/goal allow-open-tasks`.
@@ -13,6 +15,7 @@
 - `multiloop_start` accepts a run with no `verifyCommand`. Such a run has no metric and uses log acceptance.
 - The measured setup guide collapses to one repo scan, one proposal, and one approval. It asks a clarification round only when the scan found no command that produces a metric, when more than one plausible metric source exists, or when a proposed command is unsafe.
 - Compaction resume reads Pi's `reason` and `willRetry` compaction event fields.
+- The start prompt for a run with no verify command no longer tells the agent to establish a baseline and call `multiloop_measure`. It asks for the next concrete action and `multiloop_log` instead.
 
 ### Removed
 - The five-second compaction timing window and the `isIdle`/`now`/`lastActiveAgentEndAt`/`lastInputAt`/`recentWindowMs` inputs to `decideCompactionResumeTiming`. It now takes `reason` and `willRetry`. This is a breaking change for anything importing that function directly.

@@ -4,6 +4,7 @@ import {
   buildAutoContinuePrompt,
   buildCompactionResumePrompt,
   buildExplicitResumePrompt,
+  buildLoopStartPrompt,
   buildSetupGuidePrompt,
   formatAccounting,
   formatDuration,
@@ -84,6 +85,25 @@ describe("accounting", () => {
   });
 });
 
+describe("buildLoopStartPrompt", () => {
+  it("tells a measured run to establish a baseline", () => {
+    const prompt = buildLoopStartPrompt(measuredState());
+    expect(prompt).toContain("Verify: `./bench.py`");
+    expect(prompt).toContain("Metric: p50_ms (lower)");
+    expect(prompt).toContain("establish a baseline");
+    expect(prompt).toContain("multiloop_measure");
+  });
+
+  it("does not send a metric-free run after a verify command it does not have", () => {
+    const prompt = buildLoopStartPrompt(goalState());
+    expect(prompt).toContain("No verify command: this run has no metric.");
+    expect(prompt).not.toContain("establish a baseline");
+    expect(prompt).not.toContain("multiloop_measure");
+    expect(prompt).not.toContain("Metric direction");
+    expect(prompt).toContain("multiloop_log");
+  });
+});
+
 describe("user-facing formatting", () => {
   it("formats durations at each scale", () => {
     expect(formatDuration(0)).toBe("0s");
@@ -136,6 +156,8 @@ describe("model-facing prompts carry no work accounting", () => {
     ["auto continue (measured)", buildAutoContinuePrompt([measuredState()])],
     ["explicit resume", buildExplicitResumePrompt([budgetedGoal, measuredState()])],
     ["compaction resume", buildCompactionResumePrompt([budgetedGoal], "entry-1")],
+    ["loop start (goal)", buildLoopStartPrompt(budgetedGoal)],
+    ["loop start (measured)", buildLoopStartPrompt(measuredState())],
     ["setup guide", buildSetupGuidePrompt("make it faster")],
   ];
 

@@ -418,6 +418,32 @@ export function buildAutoContinuePrompt(states: LoopState[], taskSnapshot?: Task
   ].join("\n");
 }
 
+export function buildLoopStartPrompt(state: LoopState): string {
+  // A run with no verify command has no baseline to establish and no metric
+  // to measure, so it must not be told to run one.
+  const measured = Boolean(state.verifyCommand);
+  return [
+    `New ${state.mode} loop started: ${formatLaneId({ lane: state.lane, runTag: state.runTag })}`,
+    state.verifyCommand ? `Verify: \`${state.verifyCommand}\`` : "No verify command: this run has no metric.",
+    state.guardCommand ? `Guard: \`${state.guardCommand}\`` : null,
+    state.promptVerifier ? `Prompt verifier: ${state.promptVerifier}` : null,
+    state.acceptancePolicy ? `Acceptance: ${state.acceptancePolicy}` : null,
+    state.metricName
+      ? `Metric: ${state.metricName} (${state.metricDirection})`
+      : measured ? `Metric direction: ${state.metricDirection}` : null,
+    `Acceptance mode: ${state.acceptanceMode}`,
+    state.scope ? `Scope: ${state.scope}` : null,
+    `Goal: ${state.goal ?? ""}`,
+    "",
+    measured
+      ? "Run the verify command to establish a baseline, call multiloop_measure to persist it, then keep iterating until the loop is stopped or paused."
+      : "Do the next concrete action toward the goal and record each finished step with multiloop_log. Keep working until the run is stopped or paused, or until the goal is achieved.",
+    measured
+      ? "If asked a status/query while this loop remains running, answer briefly, then continue verify → measure → decide/log in state/results."
+      : "If asked a status/query while this run remains running, answer briefly, then continue the work.",
+  ].filter((line): line is string => line !== null).join("\n");
+}
+
 export function buildSetupGuidePrompt(goalSeed?: string): string {
   return [
     "Set up a pi-multiloop measured run and get it started with one approval.",
@@ -973,22 +999,6 @@ export default function (pi: ExtensionAPI) {
     return state;
   }
 
-  function buildLoopStartPrompt(state: LoopState): string {
-    return [
-      `New ${state.mode} loop started: ${formatLaneId({ lane: state.lane, runTag: state.runTag })}`,
-      state.verifyCommand ? `Verify: \`${state.verifyCommand}\`` : null,
-      state.guardCommand ? `Guard: \`${state.guardCommand}\`` : null,
-      state.promptVerifier ? `Prompt verifier: ${state.promptVerifier}` : null,
-      state.acceptancePolicy ? `Acceptance: ${state.acceptancePolicy}` : null,
-      state.metricName ? `Metric: ${state.metricName} (${state.metricDirection})` : `Metric direction: ${state.metricDirection}`,
-      `Acceptance mode: ${state.acceptanceMode}`,
-      state.scope ? `Scope: ${state.scope}` : null,
-      `Goal: ${state.goal ?? ""}`,
-      "",
-      "Run the verify command to establish a baseline, call multiloop_measure to persist it, then keep iterating until the loop is stopped or paused.",
-      "If asked a status/query while this loop remains running, answer briefly, then continue verify → measure → decide/log in state/results.",
-    ].filter((line): line is string => line !== null).join("\n");
-  }
 
   const StartParams = Type.Object({
     lane: Type.String({ description: "Lane identifier for this loop" }),
