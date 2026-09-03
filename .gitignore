@@ -2,3 +2,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 .multiloop/
+
+# Not committed: the package ships no runtime dependencies, so this would only
+# pin dev tooling. CI installs from the manifest so fresh runs pick up patched
+# test dependencies (see .github/workflows/test.yml).
+package-lock.json
