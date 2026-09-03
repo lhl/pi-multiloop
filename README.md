@@ -1,29 +1,22 @@
 # pi-multiloop
 
-An autoloop/autoresearch extension for [Pi](https://pi.dev) coding agent that lets you run multiple loops in the same worktree with isolated state per lane, plus a one-command `/goal` for work that has no metric.
+An autoloop/autoresearch/goal extension for [Pi](https://pi.dev) coding agent that lets you run multiple loops in the same worktree with isolated state per lane.
 
-## Why
+## Intro
 
 Other loop extensions only support one loop per session or worktree. If you're tuning a CUDA kernel and sweeping quantization parameters at the same time, those experiments touch different files but share the same build artifacts. pi-multiloop lets each loop have its own lane with independent state, so you don't need extra worktrees or branches.
 
-## Two ways to start
-
-| Command | Use it for | Setup |
-| --- | --- | --- |
-| `/goal <objective>` | One objective with no metric — fix this, finish that, work through this problem | None. The lane, mode, and scope are derived and work starts immediately. |
-| `/multiloop <goal>` | Repeated measured improvement against a number | One repo scan, one proposal, one approval. |
-
-Both create ordinary runs under `.multiloop/`, so `ls`, `status`, `resume`, `pause`, `stop`, and `archive` work on either.
+It also supports different loop types/styles. For more control, run `/multiloop` with a prompt to interactively create a run. This is best for optimization or auto-research loops where you want to create a verifier, etc. There is also a quick `/goal` mode that fires off a loop and let's the model fully decide what they want to do. (Both methods create ordinary runs under `.multiloop/`, so `ls`, `status`, `resume`, `pause`, `stop`, and `archive` work on either.)
 
 ## Features
 
-- **Quick goals** — `/goal fix the flaky Windows install` starts working now; no metric, no verify command, no setup questions
 - **Multi-loop isolation** — run multiple loops on the same worktree, each with its own lane and state
-- **Four modes** — flexibly supports different types of loops:
+- **Five modes** — flexibly supports different types of loops:
   - **Optimize** — the classic edit, measure, keep/revert cycle
   - **Research** — log results from ablations or parameter sweeps without keep/revert
   - **Dev** — implement, test, commit with iteration tracking
   - **Punchlist** — iterate through a checklist until everything is done
+  - **Quick goals** — use `/goal [task]` to get started working on a loop immediately (no setup, let the model decide)
 - **Flexible goals** — verify with any script or command you want
 - **Compound verifiers** — combine a metric with mechanical guards and prompt-based correctness checks; keep is recommended only when the metric improves and all checks pass
 - **Confidence scoring** — supports Median Absolute Deviation (MAD) to handle noisy benchmarks like GPU timing or training loss
