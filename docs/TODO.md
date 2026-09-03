@@ -1,6 +1,6 @@
 # TODO
 
-Future work tracked here. Current version: 0.3.0. Next publish target: TBD.
+Future work tracked here. Current version: 0.4.0. Next publish target: TBD.
 
 This file is the working cleanup plan distilled from `docs/FEEDBACK.md`.
 Keep tasks bite-sized and commit each logical unit separately.
@@ -75,7 +75,7 @@ Keep tasks bite-sized and commit each logical unit separately.
 
 - [x] Make `docs/LOOP_GUIDE.md` the canonical setup contract.
 - [x] Reduce duplication between `skills/multiloop/SKILL.md`, `docs/LOOP_GUIDE.md`, and `buildSetupGuidePrompt()`; the skill and runtime prompt should summarize and point at the canonical guide.
-- [x] Name the two-phase boundary consistently: all clarification before launch; after explicit launch approval, continue autonomously until stopped, paused, completed, or blocked.
+- [x] Name the two-phase boundary consistently: all clarification before launch; after explicit launch approval, continue autonomously until stopped, paused, completed, or blocked. Superseded in 0.4.0: measured launches now propose once and start on one approval, and clarification is the exception rather than the rule.
 - [x] Prefer multiple-choice clarification prompts in the guide examples.
 - [x] Add a short note that this is a dev-facing tool: the expected users are developers installing a loop helper, not a broad end-user audience.
 
@@ -86,8 +86,28 @@ Keep tasks bite-sized and commit each logical unit separately.
 - [~] Structured lessons schema for `lessons.md` entries — deferred until lessons are consumed programmatically; freeform pivot notes remain adequate.
 - [~] Typed resume-health decision for clean resume vs repaired resume vs fresh start — deferred until we see real corrupted/partial state cases beyond current reconstruction and refusal paths.
 - [~] Web-search escalation rung after pivot exhaustion — deferred to preserve local/repo-first behavior and avoid introducing web dependency into the core loop.
-- [~] CI / trusted npm publishing — deferred; local `tsc`, `vitest`, and `pi install .` smoke pass for 0.3.0, but CI credentials/publishing policy are outside this code pass.
+- [x] CI / trusted npm publishing — `.github/workflows/publish.yml` publishes on a `v*` tag using npm OIDC trusted publishing with provenance. See `docs/PUBLISH.md`.
 - [x] Lane-level `.gitignore` hint for `.multiloop/`.
+
+## 0.4.0 — quick goals and work accounting
+
+Landed:
+
+- [x] `/goal <objective>` as a launch path into the same engine: derive lane, mode, and scope; start with no setup interview and no launch confirmation.
+- [x] Optional `verifyCommand` on `multiloop_start`, so a run can converge on a completion audit instead of a metric threshold.
+- [x] `get_goal`, completion-only `update_goal`, the pi-tasks open-task completion gate, and `/goal allow-open-tasks`.
+- [x] Read-only pi-tasks integration: snapshot injection into quick-goal continuations, and stand-down when pi-tasks has queued the next turn.
+- [x] Pause a run whose continuation makes no tool calls.
+- [x] Per-run accounting of elapsed time, turns, tool calls, and tokens, reported only to the user, with an optional token cap that pauses the run.
+- [x] Compaction resume driven by Pi's `reason` and `willRetry` instead of a five-second timing window.
+- [x] Single-approval measured launch across the runtime prompt, `SKILL.md`, and `LOOP_GUIDE.md`.
+
+Follow-ups:
+
+- [ ] Terminal smoke of the full quick-goal lifecycle: start, continuation, task gate, budget pause, resume, completion audit, and `/goal clear`.
+- [ ] Decide whether a quick goal outside a git repository should fall back to a session-scoped store instead of writing `.multiloop/` into the current directory.
+- [ ] Attribution when several runs are attached at once: a turn currently charges its accounting to every running run rather than splitting it.
+- [ ] Refresh the `@earendil-works/pi-coding-agent` devDependency from `^0.74.0`; `compactionReason()` and `compactionWillRetry()` cast through `unknown` because the pinned type definitions predate those event fields.
 
 ### Feedback reconciliation follow-ups
 

@@ -16,9 +16,13 @@ This matters because worktree-per-loop creates merge pain. When you're tuning a 
 
 4. **Flexible goal modes.** Not everything is metric optimization. Support punchlist-driven development (iterate until all checklist items are done), research ablations (log results without keep/revert), and general dev loops (implement→test→commit).
 
+   Not everything has a metric at all, either. `/goal <objective>` derives its own lane, mode, and scope and starts with no setup, producing an ordinary run with no metric and no verify command that converges on a completion audit. Setup cost should match what the work actually needs.
+
 5. **Steerability.** The agent should be steerable mid-loop — you can change the strategy, skip items, adjust thresholds, add constraints. Loops are a tool for the human, not an autonomous steamroller.
 
 6. **Minimal state files.** Two files per loop (results.jsonl + state.json) plus one shared registry. Not five files with generated scripts, config JSONs, and hook directories.
+
+7. **Work accounting belongs to the human.** Every run records elapsed time, turns, tool calls, and token totals, and reports them in status views and end-of-run notices. None of it is given to the agent: it measures cumulative work rather than context occupancy, and a running total delivered every turn reads to a model like a context gauge — enough to make one wind down work that is not finished.
 
 ### Gap Analysis
 
@@ -35,6 +39,8 @@ What exists vs. what we need:
 | Dev mode (implement→test→commit) | No | No | Yes |
 | Durable JSONL history | No (.jsonl but coupled) | Partial (TSV) | Yes |
 | Lane isolation | No | Yes (path-based) | Yes |
+| Metric-free quick goals | No | No | Yes |
+| Work accounting per run | No | No | Yes |
 | Shared results between loops | No | No | Planned (v0.2) |
 | CI/exec non-interactive mode | No | Yes | Planned (v0.2) |
 | TUI dashboard | Yes | No | Yes |
@@ -48,7 +54,9 @@ What exists vs. what we need:
 - **Own the benchmark script.** pi-autoresearch wants to generate `autoresearch.sh` for you. We take any command.
 - **Require separate worktrees.** PiSwarm uses worktree-per-agent. We use lane-per-loop on the same worktree.
 - **Build in context compression.** pi-boomerang exists and composes with us. Install both if needed.
-- **Build in goal supervision.** pi-supervisor exists and composes with us. Use it to enforce methodology over our iterations.
+- **Build a second controller for goals.** `/goal` is a launch path into the same engine, not a parallel runtime with its own store. One set of state files, one continuation arbiter, one history.
+- **Own broader goal supervision.** pi-supervisor exists and composes with us. Use it to enforce methodology over our iterations.
+- **Report work counters to the agent.** They go to the user. See north star 7.
 - **Spawn background processes.** v0.1 is in-process. Background mode (detached `pi --mode json`) is v0.2.
 
 ## Implementation Checklist
@@ -60,8 +68,11 @@ What exists vs. what we need:
 - [x] loop.ts — Core iterate/keep/revert engine, escalation ladder
 - [x] modes.ts — Mode definitions, punchlist parser, mode detection
 - [x] index.ts — Extension entry point, pi events, tools, commands
+- [x] goal.ts — Quick-goal parsing, lane/mode derivation, objective validation, goal prompts
+- [x] tasks.ts — Read-only pi-tasks store discovery, snapshot, and prompt formatting
 - [x] ui.ts — Pi-native status/list/resume surfaces plus dashboard formatting helpers
 - [x] `SKILL.md` — Setup wizard skill prompt
 - [x] Tests for lanes, state, metrics, loop engine, verifiers, prompts, list/status formatting
+- [x] Tests for quick goals, work accounting, and extension registration
 - [ ] Local install + integration test
 - [ ] Add as devstack submodule
