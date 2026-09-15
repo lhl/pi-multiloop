@@ -50,6 +50,7 @@ The package registers the `multiloop` skill. Pi loads its quick-goal, repository
 # Hold it, pick it back up, or let it go (its history stays on disk).
 /goal pause
 /goal resume
+/goal stop
 /goal clear
 ```
 
@@ -100,6 +101,8 @@ Pick a task, implement, test, commit. General development with iteration trackin
 
 ### Punchlist
 Parse a markdown checklist, pick the next open (`[ ]`) or partial (`[~]`) item, implement, verify, and check it off (`[x]`) or leave it partial with a reason. Punchlist loops default to log/progress acceptance using the `open_or_partial_items` metric; use keep/revert only for explicit metric optimization goals.
+
+`/goal` and `/goal list` show running and paused goals with command hints. Other runs are counted with a pointer to `/multiloop`. Use `/goal pause`, `/goal stop`, or `/goal resume`, optionally followed by the `lane/run-tag` shown in the list. Without a target, the command selects the attached eligible goal or the only eligible saved goal. If more than one saved goal matches, supply its target. These commands select only goals.
 
 `/goal` picks one of these four from the objective's wording and defaults to `dev`. The mode only shapes how the agent approaches the work — a quick goal has no metric in any mode.
 
