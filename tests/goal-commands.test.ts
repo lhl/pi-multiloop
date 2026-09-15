@@ -21,11 +21,11 @@ async function fixture() {
   register({ on: vi.fn(), registerCommand: (name: string, command: typeof commands extends Map<string, infer V> ? V : never) => commands.set(name, command), registerTool: vi.fn(), registerMessageRenderer: vi.fn(), sendMessage: vi.fn(), sendUserMessage } as unknown as Parameters<typeof register>[0]);
   function add(lane: string, kind: "goal" | "measured" = "goal") {
     const id = { lane, runTag: "run" };
-    ensureLaneDir(cwd, id);
+    const stateDir = ensureLaneDir(cwd, id);
     const state = createInitialState(id, "dev", undefined, { kind, goal: `${lane} objective`, acceptanceMode: "log" });
     state.status = "paused";
     saveState(cwd, id, state);
-    registerLoop(cwd, { ...id, mode: "dev", status: "paused", createdAt: new Date().toISOString() });
+    registerLoop(cwd, { ...id, mode: "dev", status: "paused", startedAt: new Date().toISOString(), stateDir });
     return id;
   }
   return { cwd, notices, sendUserMessage, add, command: (args: string) => commands.get("goal")!.handler(args, ctx) };
