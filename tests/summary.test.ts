@@ -99,6 +99,48 @@ describe("run summary content", () => {
     );
   });
 
+  it("reports the metric the run reached and how the last iteration was accepted", () => {
+    const state = measuredState({ baseline: 12, bestMetric: 0, lastAction: "keep" });
+    const lines = formatRunSummary(buildRunSummary(state, "stopped"), { formatStamp }).split("\n");
+    expect(lines[3]).toBe("  metric p50_ms: 0 best (baseline 12) · last iteration kept");
+    expect(lines[4]).toBe("  mode optimize · 12 iterations · 8 kept, 3 reverted, 1 logged");
+    expect(lines[5]).toBe("  34 turns · 128 tool calls · 1.4M tokens");
+  });
+
+  it("names the last action for every recorded outcome", () => {
+    const labels = { revert: "reverted", log: "logged", skip: "skipped", crash: "crashed", blocked: "blocked" };
+    for (const [action, label] of Object.entries(labels)) {
+      const state = measuredState({ baseline: 12, bestMetric: 4, lastAction: action as LoopState["lastAction"] });
+      expect(formatRunSummary(buildRunSummary(state, "paused"), { formatStamp })).toContain(
+        `last iteration ${label}`
+      );
+    }
+  });
+
+  it("omits the baseline when the run never recorded one", () => {
+    const state = measuredState({ baseline: null, bestMetric: 41, lastAction: "log" });
+    expect(formatRunSummary(buildRunSummary(state, "stopped"), { formatStamp })).toContain(
+      "  metric p50_ms: 41 best · last iteration logged"
+    );
+  });
+
+  it("drops the metric name when the run never named one", () => {
+    const state = measuredState({ metricName: undefined, baseline: 2, bestMetric: 1, lastAction: "keep" });
+    expect(formatRunSummary(buildRunSummary(state, "stopped"), { formatStamp })).toContain(
+      "  metric: 1 best (baseline 2) · last iteration kept"
+    );
+  });
+
+  it("keeps the card unchanged when a measured run recorded no metric", () => {
+    const text = formatRunSummary(buildRunSummary(measuredState(), "stopped"), { formatStamp });
+    expect(text).not.toContain("metric");
+  });
+
+  it("leaves a goal without a metric line even when the state carries one", () => {
+    const state = goalState({ baseline: 3, bestMetric: 1, lastAction: "keep" });
+    expect(formatRunSummary(buildRunSummary(state, "complete"), { formatStamp })).not.toContain("metric");
+  });
+
   it("dates both stamps only when the run crosses a calendar day", () => {
     const sameDay = buildRunSummary(goalState(), "complete");
     expect(formatRunSummary(sameDay, { formatStamp })).not.toContain("<2026");

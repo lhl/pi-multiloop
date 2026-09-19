@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- An end-of-run summary card for every run that completes, stops, or pauses. It reports the outcome, the objective, local start and finish stamps, wall-clock elapsed against active agent time, and the work counters, plus a resume command for a run that has not finished. The card is written as a session entry with `pi.appendEntry`, so it persists in the transcript and never enters model context; hosts without entry renderers fall back to a notification.
+- An end-of-run summary card for every run that completes, stops, or pauses. It reports the outcome, the objective, local start and finish stamps, wall-clock elapsed against active agent time, and the work counters, plus a resume command for a run that has not finished. A measured run's card also reports the metric it reached against its baseline and how the last iteration was accepted. The card is written as a session entry with `pi.appendEntry`, so it persists in the transcript and never enters model context; hosts without entry renderers fall back to a notification.
 
 ### Changed
 - `LoopState` records `finishedAt` when a run reaches a holding or terminal status, and clears it on resume.

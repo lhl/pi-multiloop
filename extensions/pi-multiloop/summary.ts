@@ -1,6 +1,6 @@
 import { Text } from "@earendil-works/pi-tui";
 import { formatDuration, formatTokenCount } from "./format.js";
-import { type LoopState, type RunAccounting, accountedTokens, isQuickGoal, readAccounting } from "./state.js";
+import { type LoopState, type ResultAction, type RunAccounting, accountedTokens, isQuickGoal, readAccounting } from "./state.js";
 
 /**
  * Session entry type for the durable end-of-run card.
@@ -37,6 +37,14 @@ export interface RunSummary {
   /** Recorded steps for a goal, or iterations for a measured run. */
   steps: number;
   counters: RunSummaryCounters;
+  /** Measured runs: the metric the run tracked, when one was named. */
+  metricName?: string;
+  /** Measured runs: the metric recorded before the run started. */
+  baseline?: number | null;
+  /** Measured runs: the best value the run reached. */
+  bestMetric?: number | null;
+  /** Measured runs: how the last recorded iteration was accepted. */
+  lastAction?: ResultAction | null;
   /** The command that continues the run, when one exists. */
   hint?: string;
 }
@@ -64,6 +72,10 @@ export function buildRunSummary(
     accounting: readAccounting(state),
     tokenBudget: state.tokenBudget,
     steps: state.iteration,
+    metricName: state.metricName,
+    baseline: state.baseline,
+    bestMetric: state.bestMetric,
+    lastAction: state.lastAction,
     counters: {
       keeps: state.keeps ?? 0,
       reverts: state.reverts ?? 0,
@@ -139,7 +151,41 @@ function formatWorkLines(summary: RunSummary): string[] {
     `${summary.steps} iteration${summary.steps === 1 ? "" : "s"}`,
     counters,
   ].filter((part): part is string => Boolean(part));
-  return [progress.join(" · "), [turns, toolCalls, tokens].join(" · ")];
+  const metric = formatMetricLine(summary);
+  return [
+    ...(metric ? [metric] : []),
+    progress.join(" · "),
+    [turns, toolCalls, tokens].join(" · "),
+  ];
+}
+
+const LAST_ACTION_LABELS: Record<ResultAction, string> = {
+  keep: "kept",
+  revert: "reverted",
+  log: "logged",
+  skip: "skipped",
+  crash: "crashed",
+  blocked: "blocked",
+};
+
+/**
+ * What the run measured and how its last iteration was accepted. A goal has no
+ * metric, and a measured run that never recorded one keeps the card it had.
+ */
+function formatMetricLine(summary: RunSummary): string | undefined {
+  if (summary.kind !== "measured") return undefined;
+  const best = summary.bestMetric;
+  if (best === null || best === undefined) return undefined;
+  const label = summary.metricName ? `metric ${summary.metricName}` : "metric";
+  const baseline = summary.baseline;
+  const parts = [
+    baseline !== null && baseline !== undefined
+      ? `${label}: ${best} best (baseline ${baseline})`
+      : `${label}: ${best} best`,
+  ];
+  const action = summary.lastAction ? LAST_ACTION_LABELS[summary.lastAction] : undefined;
+  if (action) parts.push(`last iteration ${action}`);
+  return parts.join(" · ");
 }
 
 function formatCounters(counters: RunSummaryCounters): string | undefined {

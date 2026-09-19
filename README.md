@@ -117,7 +117,7 @@ Goal complete · ship-installer/run-001
   4 steps · 12 turns · 63 tool calls · 210K of 500K tokens
 ```
 
-Elapsed time is wall-clock; active time counts only the turns the agent spent on that run. A measured run's card also carries its mode, iteration count, and keep/revert/log totals, and any card for a run that has not finished names the command that resumes it.
+Elapsed time is wall-clock; active time counts only the turns the agent spent on that run. A measured run's card also carries its mode, iteration count, and keep/revert/log totals, the metric it reached against its baseline, and how the last iteration was accepted. Any card for a run that has not finished names the command that resumes it.
 
 The card is a session entry, so it stays in the transcript across reloads and is never added to the agent's context.
 
