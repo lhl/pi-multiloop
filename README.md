@@ -24,7 +24,7 @@ It also supports different loop types/styles. For more control, run `/multiloop`
 - **Mechanical continuation** — loop-owned turns automatically queue the next required action while the loop remains running, while still allowing brief answers to user status questions
 - **Compaction-aware resume** — when pi auto-compacts during a loop explicitly started or resumed in the current session, pi-multiloop injects a loop-aware resume prompt after the interrupted turn ends
 - **Escalation** — refines strategy automatically after consecutive failures
-- **Work accounting** — every run records elapsed time, turns, tool calls, and token totals, reported in status views and when a run ends
+- **Work accounting** — every run records elapsed time, turns, tool calls, and token totals, reported in status views and on a summary card when a run ends
 - **Pi-native status surfaces** — footer status, resumable-loop notices, and `/multiloop status` / `/multiloop ls` views
 
 ## Install
@@ -108,14 +108,18 @@ Parse a markdown checklist, pick the next open (`[ ]`) or partial (`[~]`) item, 
 
 ## Work accounting
 
-Every run records elapsed active time, turns, tool calls, and cumulative input and output tokens. `/multiloop status` and `/goal` report them, and so does the notice printed when a run pauses or completes:
+Every run records elapsed active time, turns, tool calls, and cumulative input and output tokens. `/multiloop status` and `/goal` report them, and a run that completes, stops, or pauses leaves a summary card in the transcript:
 
 ```
-Goal ship-installer/run-001 — running
+Goal complete · ship-installer/run-001
   fix the flaky Windows install
-  mode dev, 4 recorded steps
-  time 41m, 12 turns, 63 tool calls, 210K tokens
+  Sep 7, 9:12 AM → 11:40 AM · 2h 28m elapsed (1h 51m active)
+  4 steps · 12 turns · 63 tool calls · 210K of 500K tokens
 ```
+
+Elapsed time is wall-clock; active time counts only the turns the agent spent on that run. A measured run's card also carries its mode, iteration count, and keep/revert/log totals, and any card for a run that has not finished names the command that resumes it.
+
+The card is a session entry, so it stays in the transcript across reloads and is never added to the agent's context.
 
 `/goal --tokens 200k <objective>` or `/goal tokens 200k` caps the total. When a run reaches its cap it pauses and tells you; raise or clear the cap with `/goal tokens <N|off>` and resume.
 

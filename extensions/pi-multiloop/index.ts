@@ -19,7 +19,6 @@ import {
 } from "./lanes.js";
 import {
   type LoopState,
-  type RunAccounting,
   accountedTokens,
   emptyAccounting,
   isQuickGoal,
@@ -68,6 +67,18 @@ import {
   formatVerificationChecks,
   normalizeVerificationChecks,
 } from "./verifiers.js";
+import { formatAccounting, formatTokenCount } from "./format.js";
+import {
+  RUN_SUMMARY_ENTRY,
+  type RunSummary,
+  type RunSummaryDetail,
+  buildRunSummary,
+  formatRunSummary,
+  registerRunSummaryRenderer,
+  supportsRunSummaryCard,
+} from "./summary.js";
+
+export { formatAccounting, formatDuration, formatTokenCount } from "./format.js";
 
 const activeStates = new Map<string, LoopState>();
 let agentRunning = false;
@@ -126,43 +137,6 @@ function collectAssistantUsage(messages: unknown[]): { input: number; output: nu
 
 function numericField(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-export function formatDuration(totalSeconds: number): string {
-  const seconds = Math.max(0, Math.trunc(totalSeconds));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.trunc(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.trunc(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  if (hours >= 24) return `${Math.trunc(hours / 24)}d ${hours % 24}h ${remainingMinutes}m`;
-  return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
-}
-
-export function formatTokenCount(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `${trimDecimal(value / 1_000_000)}M`;
-  if (abs >= 1_000) return `${trimDecimal(value / 1_000)}K`;
-  return String(Math.trunc(value));
-}
-
-function trimDecimal(value: number): string {
-  const rounded = value.toFixed(1);
-  return rounded.endsWith(".0") ? rounded.slice(0, -2) : rounded;
-}
-
-/**
- * One-line work summary for the user. Callers must not put this in a prompt.
- */
-export function formatAccounting(accounting: RunAccounting, tokenBudget?: number): string {
-  const tokens = accountedTokens(accounting);
-  const budget = tokenBudget === undefined ? "" : ` of ${formatTokenCount(tokenBudget)}`;
-  return [
-    `time ${formatDuration(accounting.activeSeconds)}`,
-    `${accounting.turns} turn${accounting.turns === 1 ? "" : "s"}`,
-    `${accounting.toolCalls} tool call${accounting.toolCalls === 1 ? "" : "s"}`,
-    `${formatTokenCount(tokens)}${budget} tokens`,
-  ].join(", ");
 }
 
 /** Live pi-tasks state for this session, or null when there is no store. */
@@ -808,6 +782,8 @@ function announceResumableLoops(pi: ExtensionAPI, ctx: ExtensionContext): void {
 }
 
 export default function (pi: ExtensionAPI) {
+  registerRunSummaryRenderer(pi);
+
   pi.registerMessageRenderer("multiloop-resume", (message, _options, theme) =>
     new Text(colorizeResumableLoopsNotice(messageText(message.content), {
       fg: (name, text) => theme.fg(name as Parameters<typeof theme.fg>[0], text),
@@ -890,15 +866,10 @@ export default function (pi: ExtensionAPI) {
     for (const state of runningStates()) {
       if (!budgetExhausted(state)) continue;
       const id: LaneId = { lane: state.lane, runTag: state.runTag };
-      pauseLoop(ctx, id);
-      ctx.ui.notify(
-        [
-          `Paused ${formatLaneId(id)}: token budget reached.`,
-          `  ${formatAccounting(readAccounting(state), state.tokenBudget)}`,
-          `  Raise or clear it with /goal tokens <N|off>, then /multiloop resume ${formatLaneId(id)}.`,
-        ].join("\n"),
-        "warning"
-      );
+      pauseLoop(ctx, id, {
+        reason: "token budget reached",
+        hint: `Raise or clear the cap with /goal tokens <N|off>, then resume with /multiloop resume ${formatLaneId(id)}.`,
+      });
     }
 
     if (resumeAfterCompact) {
@@ -924,15 +895,10 @@ export default function (pi: ExtensionAPI) {
     // Pause rather than spend another turn on the same prompt.
     if (continuationsQueued > 0 && toolCallsSinceContinuation === 0) {
       continuationsQueued = 0;
-      const stalled = runningStates();
-      for (const state of stalled) {
-        pauseLoop(ctx, { lane: state.lane, runTag: state.runTag });
-      }
-      if (stalled.length > 0) {
-        ctx.ui.notify(
-          `Paused ${stalled.map((state) => `${state.lane}/${state.runTag}`).join(", ")}: the last continuation made no tool calls. Resume with /multiloop resume <lane/run-tag>.`,
-          "warning"
-        );
+      for (const state of runningStates()) {
+        pauseLoop(ctx, { lane: state.lane, runTag: state.runTag }, {
+          reason: "the last continuation made no tool calls",
+        });
       }
       return;
     }
@@ -1469,6 +1435,7 @@ export default function (pi: ExtensionAPI) {
     const state = reconstructState(ctx.cwd, id);
     if (!state) return null;
     state.status = "running";
+    state.finishedAt = undefined;
     saveState(ctx.cwd, id, state);
     activeStates.set(stateKey(id), state);
     updateLoopStatus(ctx.cwd, id, "active");
@@ -1476,29 +1443,56 @@ export default function (pi: ExtensionAPI) {
     return state;
   }
 
-  function pauseLoop(ctx: ExtensionContext | ExtensionCommandContext, id: LaneId): string {
+  /**
+   * Show the user what the run cost. The card is a session entry, so it stays
+   * out of model context; hosts without entry renderers get a notification.
+   */
+  function announceRunSummary(
+    ctx: ExtensionContext | ExtensionCommandContext,
+    summary: RunSummary
+  ): void {
+    if (supportsRunSummaryCard(pi)) {
+      pi.appendEntry(RUN_SUMMARY_ENTRY, summary);
+      return;
+    }
+    ctx.ui.notify(formatRunSummary(summary), "info");
+  }
+
+  function pauseLoop(
+    ctx: ExtensionContext | ExtensionCommandContext,
+    id: LaneId,
+    detail: RunSummaryDetail = {}
+  ): string {
     const key = stateKey(id);
     const state = activeStates.get(key) ?? reconstructState(ctx.cwd, id);
     if (!state) return `No state found for ${formatLaneId(id)}.`;
 
     state.status = "paused";
+    state.finishedAt = new Date().toISOString();
     saveState(ctx.cwd, id, state);
     updateLoopStatus(ctx.cwd, id, "paused");
     activeStates.delete(key);
     updateStatus(ctx);
+    announceRunSummary(ctx, buildRunSummary(state, "paused", detail));
     return `Paused loop ${formatLaneId(id)}.`;
   }
 
-  function stopLoop(ctx: ExtensionContext | ExtensionCommandContext, id: LaneId): string {
+  function stopLoop(
+    ctx: ExtensionContext | ExtensionCommandContext,
+    id: LaneId,
+    detail: RunSummaryDetail = {}
+  ): string {
     const key = stateKey(id);
     const state = activeStates.get(key) ?? reconstructState(ctx.cwd, id);
     if (!state) return `No state found for ${formatLaneId(id)}.`;
 
     state.status = "stopped";
+    state.finishedAt = new Date().toISOString();
     saveState(ctx.cwd, id, state);
     updateLoopStatus(ctx.cwd, id, "completed");
     activeStates.delete(key);
     updateStatus(ctx);
+    announceRunSummary(ctx, buildRunSummary(state, "stopped", detail));
     return `Stopped loop ${formatLaneId(id)}.`;
   }
 
@@ -1791,14 +1785,12 @@ export default function (pi: ExtensionAPI) {
   function completeGoal(ctx: ExtensionContext, state: LoopState): string {
     const id = goalId(state);
     state.status = "completed";
+    state.finishedAt = new Date().toISOString();
     saveState(ctx.cwd, id, state);
     updateLoopStatus(ctx.cwd, id, "completed");
     activeStates.delete(stateKey(id));
     updateStatus(ctx);
-    ctx.ui.notify(
-      [`Goal complete: ${state.lane}/${state.runTag}`, `  ${state.goal ?? ""}`, `  ${formatAccounting(readAccounting(state), state.tokenBudget)}`].join("\n"),
-      "info"
-    );
+    announceRunSummary(ctx, buildRunSummary(state, "complete"));
     return `Goal ${state.lane}/${state.runTag} marked complete.`;
   }
 
@@ -1893,7 +1885,8 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         if (operation === "pause" || operation === "stop") {
-          ctx.ui.notify(operation === "pause" ? pauseLoop(ctx, resolution.id) : stopLoop(ctx, resolution.id), "info");
+          if (operation === "pause") pauseLoop(ctx, resolution.id);
+          else stopLoop(ctx, resolution.id);
           return;
         }
         const resumed = resumeLoop(ctx, resolution.id);
@@ -1984,7 +1977,7 @@ export default function (pi: ExtensionAPI) {
             return;
           }
           if (command.status === "paused") {
-            ctx.ui.notify(pauseLoop(ctx, goalId(goal)), "info");
+            pauseLoop(ctx, goalId(goal));
             return;
           }
           const resumed = resumeLoop(ctx, goalId(goal));
@@ -2095,12 +2088,12 @@ export default function (pi: ExtensionAPI) {
         const target = trimmed.replace(/^stop\s*/, "").trim();
         if (!target) {
           const lines = stopAllActive(ctx);
-          ctx.ui.notify(lines.length > 0 ? lines.join("\n") : "No active loops to stop.", "info");
+          if (lines.length === 0) ctx.ui.notify("No active loops to stop.", "info");
           return;
         }
         const resolution = resolveCommandTarget("stop", target, ctx, ["active", "paused", "completed"]);
         if (resolution.status !== "resolved") return;
-        ctx.ui.notify(stopLoop(ctx, resolution.id), "info");
+        stopLoop(ctx, resolution.id);
         return;
       }
 
@@ -2108,12 +2101,12 @@ export default function (pi: ExtensionAPI) {
         const target = trimmed.replace(/^pause\s*/, "").trim();
         if (!target) {
           const lines = pauseAllActive(ctx);
-          ctx.ui.notify(lines.length > 0 ? lines.join("\n") : "No active loops to pause.", "info");
+          if (lines.length === 0) ctx.ui.notify("No active loops to pause.", "info");
           return;
         }
         const resolution = resolveCommandTarget("pause", target, ctx, ["active", "paused"]);
         if (resolution.status !== "resolved") return;
-        ctx.ui.notify(pauseLoop(ctx, resolution.id), "info");
+        pauseLoop(ctx, resolution.id);
         return;
       }
 

@@ -92,6 +92,11 @@ export interface LoopState {
   /** Work accounting. Shown to the user; never placed in model context. */
   accounting?: RunAccounting;
   startedAt: string;
+  /**
+   * When the run last reached a holding or terminal status: completed,
+   * stopped, or paused. Cleared on resume. Reported to the user only.
+   */
+  finishedAt?: string;
   lastUpdated: string;
   config: Record<string, unknown>;
 }

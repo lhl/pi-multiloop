@@ -80,7 +80,7 @@ When a loop is active:
 
 ## Work accounting
 
-Each run records elapsed time, turns, tool calls, and token totals. These are for the user: they appear in `/multiloop status`, `/goal`, the footer, and the end-of-run summary.
+Each run records elapsed time, turns, tool calls, and token totals. These are for the user: they appear in `/multiloop status`, `/goal`, the footer, and the summary card written to the transcript when a run completes, stops, or pauses. That card also carries the run's start and finish times.
 
 They are not a context-window measurement and they are never given to you. Compaction is automatic, and a long-running run is normal. Do not treat run length, or any counter you see in a status view the user pastes, as a reason to wrap up work that is not finished.
 

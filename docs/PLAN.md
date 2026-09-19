@@ -22,7 +22,7 @@ This matters because worktree-per-loop creates merge pain. When you're tuning a 
 
 6. **Minimal state files.** Two files per loop (results.jsonl + state.json) plus one shared registry. Not five files with generated scripts, config JSONs, and hook directories.
 
-7. **Work accounting belongs to the human.** Every run records elapsed time, turns, tool calls, and token totals, and reports them in status views and end-of-run notices. None of it is given to the agent: it measures cumulative work rather than context occupancy, and a running total delivered every turn reads to a model like a context gauge — enough to make one wind down work that is not finished.
+7. **Work accounting belongs to the human.** Every run records elapsed time, turns, tool calls, and token totals, and reports them in status views and on the card left in the transcript when a run ends. None of it is given to the agent: it measures cumulative work rather than context occupancy, and a running total delivered every turn reads to a model like a context gauge — enough to make one wind down work that is not finished.
 
 ### Gap Analysis
 

@@ -62,8 +62,13 @@ It also records how the run was launched and what it has cost:
 - `tokenBudget`: optional cumulative cap. Reaching it pauses the run.
 - `allowOpenTasks`: when true, completion bypasses the open-task gate. User-owned.
 - `accounting`: `activeSeconds`, `turns`, `toolCalls`, `inputTokens`, `outputTokens`.
+- `finishedAt`: when the run last reached a holding or terminal status. Cleared on resume, so a running run has none.
 
-`accounting` is reported to the user in `/multiloop status`, `/goal`, and end-of-run notices. It is never placed in a prompt, resume prompt, tool result, or tool description: it measures cumulative work rather than context occupancy, and a running total delivered every turn reads as a context-window gauge. `tests/accounting.test.ts` asserts this over every model-facing prompt builder.
+`accounting` is reported to the user in `/multiloop status`, `/goal`, and the end-of-run card. It is never placed in a prompt, resume prompt, tool result, or tool description: it measures cumulative work rather than context occupancy, and a running total delivered every turn reads as a context-window gauge. `tests/accounting.test.ts` asserts this over every model-facing prompt builder.
+
+### End-of-run card
+
+Completing, stopping, or pausing a run writes a `multiloop-run-summary` session entry: the outcome, the objective, the start and finish stamps, wall-clock elapsed against active time, and the work counters. It is rendered in the transcript by an entry renderer and, being a session entry rather than a message, never enters model context. `pi.appendEntry` has always existed, but entry renderers arrived in Pi 0.80.4, so `summary.ts` feature-detects them and falls back to a notification on older hosts. `tests/summary.test.ts` asserts both paths.
 
 ### Append-only result state
 
