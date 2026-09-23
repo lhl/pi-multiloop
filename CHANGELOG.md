@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 - 2026-09-24
 
 ### Added
+- `/goal` and `/goal list` show running and paused goals with their lane/run-tag and command hints, and `/goal pause`, `/goal stop`, and `/goal resume` act on a goal by target or, without one, on the attached goal or the only eligible saved goal. These commands select only goals; measured runs stay under `/multiloop`.
 - An end-of-run summary card for every run that completes, stops, or pauses. It reports the outcome, the objective, local start and finish stamps, wall-clock elapsed against active agent time, and the work counters, plus a resume command for a run that has not finished. A measured run's card also reports the metric it reached against its baseline and how the last iteration was accepted. The card is written as a session entry with `pi.appendEntry`, so it persists in the transcript and never enters model context; hosts without entry renderers fall back to a notification.
 
 ### Changed

@@ -1,6 +1,6 @@
 # TODO
 
-Future work tracked here. Current version: 0.4.0. Next publish target: TBD.
+Future work tracked here. Current version: 0.4.1. Next publish target: TBD.
 
 This file is the working cleanup plan distilled from `docs/FEEDBACK.md`.
 Keep tasks bite-sized and commit each logical unit separately.
