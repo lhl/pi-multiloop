@@ -12,6 +12,7 @@ import {
   parseLaneId,
   formatLaneId,
   resolveLoopTarget,
+  selectImplicitLoop,
   type TargetResolution,
   archiveLoop as archiveLaneDirs,
   deleteLaneDirs,
@@ -179,6 +180,17 @@ function textResult(text: string) {
 
 function runningStates(): LoopState[] {
   return Array.from(activeStates.values()).filter((state) => state.status === "running");
+}
+
+/**
+ * Statuses a bare resume may select from. Completed runs stay explicit-only so
+ * a finished run is not restarted by accident.
+ */
+const RESUME_CANDIDATE_STATUSES: RegistryEntry["status"][] = ["active", "paused"];
+
+/** Lane ids attached to this session, in the order they were attached. */
+function attachedLaneIds(): LaneId[] {
+  return Array.from(activeStates.values()).map((state) => ({ lane: state.lane, runTag: state.runTag }));
 }
 
 function markLoopTurn(reason: string): void {
@@ -1423,7 +1435,10 @@ export default function (pi: ExtensionAPI) {
     statuses: RegistryEntry["status"][]
   ): TargetResolution {
     const registry = readRegistry(ctx.cwd);
-    const resolution = resolveLoopTarget(registry.loops, target, { statuses });
+    const implicit = operation === "resume"
+      ? selectImplicitLoop(registry.loops, { statuses: RESUME_CANDIDATE_STATUSES, attached: attachedLaneIds() })
+      : undefined;
+    const resolution = resolveLoopTarget(registry.loops, target || (implicit ? formatLaneId(implicit) : ""), { statuses });
     if (resolution.status !== "resolved") {
       ctx.ui.notify("Could not resolve multiloop target; handing off to the agent.", "error");
       pi.sendUserMessage(buildTargetDisambiguationPrompt(operation, target, resolution, registry.loops), { deliverAs: "followUp" });
@@ -1552,16 +1567,33 @@ export default function (pi: ExtensionAPI) {
     target: Type.String({ description: "Loop target as exact lane/run-tag, or lane-only when unambiguous" }),
   });
 
+  const ResumeOperationParams = Type.Object({
+    target: Type.Optional(
+      Type.String({
+        description:
+          "Loop target as exact lane/run-tag, or lane-only when unambiguous. Omit to resume the only resumable loop.",
+      })
+    ),
+  });
+
   pi.registerTool({
     name: "multiloop_resume",
     label: "Multiloop Resume",
-    description: "Resume a paused, stopped, or detached pi-multiloop. Use after resolving the target; exact lane/run-tag is safest.",
-    parameters: HumanOperationParams,
+    description:
+      "Resume a paused, stopped, or detached pi-multiloop. Omit the target to resume the only resumable loop; otherwise pass an exact lane/run-tag, or a lane-only target when unambiguous.",
+    parameters: ResumeOperationParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const registry = readRegistry(ctx.cwd);
-      const resolution = resolveLoopTarget(registry.loops, params.target, { statuses: ["active", "paused", "completed"] });
+      const target = params.target?.trim() ?? "";
+      const implicit = selectImplicitLoop(registry.loops, {
+        statuses: RESUME_CANDIDATE_STATUSES,
+        attached: attachedLaneIds(),
+      });
+      const resolution = resolveLoopTarget(registry.loops, target || (implicit ? formatLaneId(implicit) : ""), {
+        statuses: ["active", "paused", "completed"],
+      });
       if (resolution.status !== "resolved") {
-        return textResult(buildTargetDisambiguationPrompt("resume", params.target, resolution, registry.loops));
+        return textResult(buildTargetDisambiguationPrompt("resume", target, resolution, registry.loops));
       }
       const state = resumeLoop(ctx, resolution.id);
       if (!state) return textResult(`No state found for ${formatLaneId(resolution.id)}.`);

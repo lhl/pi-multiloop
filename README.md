@@ -75,7 +75,9 @@ The package registers the `multiloop` skill. Pi loads its quick-goal, repository
 /multiloop ls --archived
 
 # Resume, pause, stop, or archive. Lane-only works only when unambiguous; exact id is safest.
+# A bare `resume` selects the attached run or the only active or paused run.
 /multiloop resume perf/run-001
+/multiloop resume
 /multiloop pause perf
 /multiloop stop perf/run-001
 /multiloop archive perf/run-001
@@ -184,7 +186,7 @@ With existing loop state, bare `/multiloop` is status-first: it shows attached r
 1. **`/multiloop`** — Shows current loop state. If no useful state exists, launches the setup guide. A loop is created only after explicit approval and `multiloop_start`, which writes `.multiloop/registry.json` and `active/<lane>/<run-tag>/state.json`.
 2. **Each iteration** — `multiloop_iterate` records an active iteration marker in `state.json`; `multiloop_measure` records pending measurements plus optional mechanical/prompt checks; `multiloop_decide`/`multiloop_log` appends to `results.jsonl`, updates action counters, clears the active marker, and atomically replaces `state.json`.
 3. **`/multiloop stop`** — Updates status in both `state.json` and registry. Files stay on disk.
-4. **`/multiloop resume`** — Explicitly reconstructs in-memory state from `results.jsonl` + `state.json` and sends a loop-aware resume prompt. No new files until next iteration.
+4. **`/multiloop resume`** — Explicitly reconstructs in-memory state from `results.jsonl` + `state.json` and sends a loop-aware resume prompt. No new files until next iteration. Without a target, it selects the attached run or the only active or paused run; completed runs need an explicit target.
 5. **Auto-continuation during a current-session loop** — After a loop-owned turn ends, if the loop is still `running` and no user message is pending, pi-multiloop sends a follow-up prompt for the next required action. If a measurement is pending, the prompt forces decide/log before new work.
 6. **Auto-compaction during a current-session loop** — Sends a resume prompt grounded in active `.multiloop/` state after compaction, including the common Pi threshold path where compaction happens immediately after `agent_end`. Manual idle `/compact` does not restart the agent.
 7. **`/multiloop archive`** — Moves the run directory from `active/` to `archive/` with a timestamp prefix.

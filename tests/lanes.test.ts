@@ -17,6 +17,7 @@ import {
   formatLaneId,
   validateLaneId,
   resolveLoopTarget,
+  selectImplicitLoop,
   type LaneId,
   type RegistryEntry,
 } from "../extensions/pi-multiloop/lanes.js";
@@ -218,6 +219,47 @@ describe("target resolver", () => {
       expect(result.id).toEqual({ lane: "perf", runTag: "run-001" });
     }
     expect(resolveLoopTarget(loops, "docs/run-002", { statuses: ["active"] }).status).toBe("unknown");
+  });
+
+  it("selects the only loop eligible for an implicit target", () => {
+    const only = [loops[1]];
+
+    expect(selectImplicitLoop(only, { statuses: ["active", "paused"] })).toEqual(loops[1]);
+    expect(selectImplicitLoop(only, { statuses: ["active"] })).toBeUndefined();
+  });
+
+  it("declines an implicit target when several loops are eligible", () => {
+    expect(selectImplicitLoop(loops, { statuses: ["active", "paused"] })).toBeUndefined();
+  });
+
+  it("prefers the one attached eligible loop", () => {
+    expect(
+      selectImplicitLoop(loops, {
+        statuses: ["active", "paused"],
+        attached: [{ lane: "docs", runTag: "run-002" }],
+      })
+    ).toEqual(loops[1]);
+  });
+
+  it("ignores attached loops that are not eligible", () => {
+    expect(
+      selectImplicitLoop(loops, {
+        statuses: ["active"],
+        attached: [{ lane: "docs", runTag: "run-002" }],
+      })
+    ).toEqual(loops[0]);
+  });
+
+  it("declines when several attached loops are eligible", () => {
+    expect(
+      selectImplicitLoop(loops, {
+        statuses: ["active", "paused"],
+        attached: [
+          { lane: "perf", runTag: "run-001" },
+          { lane: "docs", runTag: "run-002" },
+        ],
+      })
+    ).toBeUndefined();
   });
 });
 

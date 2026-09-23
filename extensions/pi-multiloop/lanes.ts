@@ -186,6 +186,30 @@ function statusAllowed(entry: RegistryEntry, statuses?: RegistryEntry["status"][
   return statuses === undefined || statuses.includes(entry.status);
 }
 
+export interface SelectImplicitLoopOptions {
+  statuses?: RegistryEntry["status"][];
+  attached?: LaneId[];
+}
+
+/**
+ * Pick the loop a command without a target should act on: the single attached
+ * eligible loop, or the only eligible loop. Returns undefined when nothing is
+ * eligible or the choice is ambiguous.
+ */
+export function selectImplicitLoop(
+  loops: RegistryEntry[],
+  options: SelectImplicitLoopOptions = {}
+): RegistryEntry | undefined {
+  const eligible = loops.filter((loop) => statusAllowed(loop, options.statuses));
+  const attached = (options.attached ?? []).filter((id) =>
+    eligible.some((loop) => loop.lane === id.lane && loop.runTag === id.runTag)
+  );
+  if (attached.length === 1) {
+    return eligible.find((loop) => loop.lane === attached[0].lane && loop.runTag === attached[0].runTag);
+  }
+  return eligible.length === 1 ? eligible[0] : undefined;
+}
+
 export function resolveLoopTarget(
   loops: RegistryEntry[],
   input: string,

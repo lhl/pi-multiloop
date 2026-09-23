@@ -6,6 +6,7 @@
 - An end-of-run summary card for every run that completes, stops, or pauses. It reports the outcome, the objective, local start and finish stamps, wall-clock elapsed against active agent time, and the work counters, plus a resume command for a run that has not finished. A measured run's card also reports the metric it reached against its baseline and how the last iteration was accepted. The card is written as a session entry with `pi.appendEntry`, so it persists in the transcript and never enters model context; hosts without entry renderers fall back to a notification.
 
 ### Changed
+- `/multiloop resume` without a target now resumes the attached run or the only active or paused run instead of handing the choice to the agent. Completed and archived runs still need an explicit target. `multiloop_resume` accepts an omitted target with the same selection.
 - `LoopState` records `finishedAt` when a run reaches a holding or terminal status, and clears it on resume.
 - Stopping or pausing a run through `/multiloop` or `/goal` no longer repeats the same sentence as a notification, because the summary card carries it.
 
