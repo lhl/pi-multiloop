@@ -1,6 +1,12 @@
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { EventBus, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  LOOP_ACTIVITY_CHANGED,
+  LOOP_ACTIVITY_REQUEST,
+  LoopActivityPublisher,
+  type LoopActivityRequest,
+} from "./activity.js";
 import {
   type LaneId,
   type RegistryEntry,
@@ -81,7 +87,54 @@ import {
 
 export { formatAccounting, formatDuration, formatTokenCount } from "./format.js";
 
-const activeStates = new Map<string, LoopState>();
+/** Session that attached each live run. Attachment is runtime state and is never persisted. */
+const runOwners = new Map<string, string>();
+/**
+ * Terminal runs kept after their live entry is gone, so a pause, stop, or archive stays
+ * reportable for the session that held the run. A later attach for the same identity
+ * replaces the retained copy, and the oldest entries are dropped at the cap.
+ */
+const retiredRuns = new Map<string, { owner: string | undefined; state: LoopState }>();
+const RETIRED_RUN_LIMIT = 50;
+
+function retainRun(key: string, state: LoopState): void {
+  retiredRuns.delete(key);
+  retiredRuns.set(key, { owner: runOwners.get(key), state });
+  while (retiredRuns.size > RETIRED_RUN_LIMIT) {
+    const oldest = retiredRuns.keys().next();
+    if (oldest.done) break;
+    retiredRuns.delete(oldest.value);
+  }
+  runOwners.delete(key);
+}
+
+/** The scoped inventory a dashboard or status surface reads instead of parsing status text. */
+const activity = new LoopActivityPublisher({
+  entries: () => [
+    ...[...activeStates].map(([key, state]) => ({ owner: runOwners.get(key), state })),
+    ...[...retiredRuns.values()],
+  ],
+});
+
+/** Live attached runs. Every attach, detach, and replacement invalidates the inventory. */
+class RetainedRunStates extends Map<string, LoopState> {
+  override set(key: string, state: LoopState): this {
+    retiredRuns.delete(key);
+    super.set(key, state);
+    activity.changed();
+    return this;
+  }
+
+  override delete(key: string): boolean {
+    const state = this.get(key);
+    if (!super.delete(key)) return false;
+    if (state) retainRun(key, state);
+    activity.changed();
+    return true;
+  }
+}
+
+const activeStates = new RetainedRunStates();
 let agentRunning = false;
 let resumeAfterCompact = false;
 let lastCompactionEntryId: string | undefined;
@@ -796,6 +849,19 @@ function announceResumableLoops(pi: ExtensionAPI, ctx: ExtensionContext): void {
 export default function (pi: ExtensionAPI) {
   registerRunSummaryRenderer(pi);
 
+  // Hosts older than the event bus keep working; they just never see this interface.
+  const events = pi.events as EventBus | undefined;
+  events?.on(LOOP_ACTIVITY_REQUEST, (value) => {
+    if (!value || typeof value !== "object") return;
+    const request = value as Partial<LoopActivityRequest>;
+    if (request.version !== 1 || typeof request.sessionId !== "string" || typeof request.respond !== "function")
+      return;
+    request.respond(activity.snapshot({ sessionId: request.sessionId }));
+  });
+  activity.subscribe(() => {
+    events?.emit(LOOP_ACTIVITY_CHANGED, { version: 1 });
+  });
+
   pi.registerMessageRenderer("multiloop-resume", (message, _options, theme) =>
     new Text(colorizeResumableLoopsNotice(messageText(message.content), {
       fg: (name, text) => theme.fg(name as Parameters<typeof theme.fg>[0], text),
@@ -972,6 +1038,7 @@ export default function (pi: ExtensionAPI) {
     };
     registerLoop(ctx.cwd, entry);
 
+    runOwners.set(stateKey(id), ctx.sessionManager.getSessionId());
     activeStates.set(stateKey(id), state);
     updateStatus(ctx);
     return state;
@@ -1452,6 +1519,7 @@ export default function (pi: ExtensionAPI) {
     state.status = "running";
     state.finishedAt = undefined;
     saveState(ctx.cwd, id, state);
+    runOwners.set(stateKey(id), ctx.sessionManager.getSessionId());
     activeStates.set(stateKey(id), state);
     updateLoopStatus(ctx.cwd, id, "active");
     updateStatus(ctx);

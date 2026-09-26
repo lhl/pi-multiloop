@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { projectLoopActivity } from "../extensions/pi-multiloop/activity.js";
+import { describe, expect, it, vi } from "vitest";
+import { LoopActivityPublisher, projectLoopActivity } from "../extensions/pi-multiloop/activity.js";
 import { createInitialState, type LoopState } from "../extensions/pi-multiloop/state.js";
 
 const scope = { sessionId: "session", branchId: "branch" };
@@ -48,5 +48,64 @@ describe("loop activity projection", () => {
     expect(projectLoopActivity(scope, 1, runs).runs).toHaveLength(2);
     expect(() => projectLoopActivity(scope, 2, [runs[0], runs[0]])).toThrow(/Duplicate/);
     expect(projectLoopActivity(scope, 3, []).runs).toEqual([]);
+  });
+});
+
+describe("loop activity publisher", () => {
+  const mine = { owner: "session", state: state({ lane: "mine", runTag: "one" }) };
+  const theirs = { owner: "other", state: state({ lane: "theirs", runTag: "two" }) };
+  const unowned = { owner: undefined, state: state({ lane: "orphan", runTag: "three" }) };
+
+  it("reports only the runs the requesting session attached", () => {
+    const publisher = new LoopActivityPublisher({ entries: () => [mine, theirs, unowned] });
+    const snapshot = publisher.snapshot({ sessionId: "session" });
+    expect(snapshot.runs.map((run) => run.lane)).toEqual(["mine"]);
+    expect(snapshot.availability).toBe("available");
+    expect(snapshot.complete).toBe(true);
+    expect(publisher.snapshot({ sessionId: "elsewhere" }).runs).toEqual([]);
+  });
+
+  it("advances the revision and notifies every subscriber, isolating failures", () => {
+    const publisher = new LoopActivityPublisher({ entries: () => [mine] });
+    const healthy = vi.fn();
+    const failing = vi.fn(() => {
+      throw new Error("consumer failed");
+    });
+    const unsubscribe = publisher.subscribe(healthy);
+    publisher.subscribe(failing);
+    const before = publisher.snapshot({ sessionId: "session" }).revision;
+    publisher.changed();
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(healthy).toHaveBeenCalledTimes(1);
+    expect(publisher.snapshot({ sessionId: "session" }).revision).toBe(before + 1);
+    unsubscribe();
+    publisher.dispose();
+    publisher.changed();
+    expect(healthy).toHaveBeenCalledTimes(1);
+    expect(failing).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports unavailable rather than empty when the producer cannot answer", () => {
+    let available = true;
+    const publisher = new LoopActivityPublisher({
+      entries: () => {
+        if (!available) throw new Error("workspace unreadable");
+        return [mine];
+      },
+      available: () => available,
+    });
+    expect(publisher.snapshot({ sessionId: "session" }).runs).toHaveLength(1);
+    available = false;
+    const down = publisher.snapshot({ sessionId: "session" });
+    expect(down.availability).toBe("unavailable");
+    expect(down.complete).toBe(false);
+    expect(down.runs).toEqual([]);
+    available = true;
+    const broken = new LoopActivityPublisher({
+      entries: () => {
+        throw new Error("workspace unreadable");
+      },
+    });
+    expect(broken.snapshot({ sessionId: "session" }).availability).toBe("unavailable");
   });
 });
